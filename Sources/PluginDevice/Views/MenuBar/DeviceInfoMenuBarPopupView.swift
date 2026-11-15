@@ -1,3 +1,4 @@
+import Foundation
 import LumiUI
 import SwiftUI
 import Combine
@@ -48,7 +49,7 @@ public struct DeviceInfoMenuBarPopupView: View {
 
     private var liveCpuView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // 紧凑指标行:使用率 + 温度(标题与数值并排,提高信息密度)
+            // 紧凑指标行:使用率 + 温度 + 开机时长(标题与数值并排,提高信息密度)
             HStack(spacing: 10) {
                 metric(
                     label: pluginLocalization.string("Usage"),
@@ -60,6 +61,12 @@ public struct DeviceInfoMenuBarPopupView: View {
                     label: pluginLocalization.string("Temperature"),
                     value: temperatureText,
                     color: thermalViewModel.peakColor
+                )
+
+                metric(
+                    label: pluginLocalization.string("Uptime"),
+                    value: uptimeText,
+                    color: .secondary
                 )
 
                 Spacer(minLength: 0)
@@ -143,6 +150,18 @@ public struct DeviceInfoMenuBarPopupView: View {
         guard let peak = thermalViewModel.peakCelsius else { return "—" }
         return String(format: "%.1f°C", peak)
     }
+
+    /// 系统已运行时长（开机至今）；与 CPU 指标同频刷新。
+    private var uptimeText: String {
+        Self.uptimeFormatter.string(from: ProcessInfo.processInfo.systemUptime) ?? "—"
+    }
+
+    private static let uptimeFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.day, .hour, .minute]
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 
     private var cpuColor: Color {
         let value = viewModel.cpuUsage
