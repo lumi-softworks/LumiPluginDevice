@@ -3,7 +3,6 @@ import LumiUI
 import SwiftUI
 
 public struct DeviceInfoView: View {
-    @LumiTheme private var theme
     private let viewModels: DevicePluginViewModels
 
     init(viewModels: DevicePluginViewModels) {
@@ -11,368 +10,502 @@ public struct DeviceInfoView: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                VStack(spacing: 16) {
-                    DeviceInfoHeaderView(
-                        deviceName: viewModels.deviceData.deviceName,
-                        osVersion: viewModels.deviceData.osVersion
-                    )
-
-                    DeviceInfoSummaryGrid(
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 12) {
+                    DashboardHeaderView(
                         deviceData: viewModels.deviceData,
                         cpu: viewModels.cpu,
+                        memory: viewModels.memory,
+                        thermal: viewModels.thermal,
+                        battery: viewModels.battery
+                    )
+
+                    DashboardHeroSection(
+                        deviceData: viewModels.deviceData,
+                        cpu: viewModels.cpu,
+                        memory: viewModels.memory,
+                        gpu: viewModels.gpu,
+                        thermal: viewModels.thermal,
                         battery: viewModels.battery,
-                        gpu: viewModels.gpu
+                        cpuHistory: viewModels.cpuHistory,
+                        memoryHistory: viewModels.memoryHistory,
+                        gpuHistory: viewModels.gpuHistory,
+                        columns: DashboardLayout.heroColumns(for: proxy.size.width)
                     )
 
-                    ExternalVolumesView(storage: viewModels.storage)
-                    UptimeView(deviceData: viewModels.deviceData)
-                }
+                    DashboardTrendsSection(
+                        viewModels: viewModels,
+                        columns: DashboardLayout.trendColumns(for: proxy.size.width)
+                    )
 
-                Divider()
-                    .padding(.horizontal)
-                    .foregroundStyle(theme.textTertiary.opacity(0.15))
+                    DashboardBottomSection(
+                        deviceData: viewModels.deviceData,
+                        cpu: viewModels.cpu,
+                        memory: viewModels.memory,
+                        battery: viewModels.battery,
+                        storage: viewModels.storage,
+                        stacked: DashboardLayout.stacksBottom(for: proxy.size.width)
+                    )
 
-                VStack(alignment: .leading, spacing: 16) {
-                    Label(pluginLocalization.string("Real-time Monitor"), systemImage: "chart.xyaxis.line")
-                        .font(.appBody)
-                        .fontWeight(.semibold)
-                        .foregroundColor(theme.textPrimary)
-                        .padding(.horizontal)
-
-                    SystemMonitorView(
-                        viewModel: viewModels.systemMonitor,
-                        gpuViewModel: viewModels.gpu,
-                        batteryViewModel: viewModels.battery,
-                        thermalViewModel: viewModels.thermal
+                    DashboardFooterView(
+                        deviceData: viewModels.deviceData,
+                        thermal: viewModels.thermal
                     )
                 }
-            }
-            .padding()
-        }
-    }
-}
-
-private struct DeviceInfoHeaderView: View {
-    let deviceName: String
-    let osVersion: String
-
-    var body: some View {
-        AppSettingSection(title: nil) {
-            AppSettingRow(
-                title: deviceName,
-                description: osVersion,
-                icon: "macbook.and.iphone"
-            ) {
-                EmptyView()
+                .padding(20)
+                .frame(maxWidth: 1240)
+                .frame(maxWidth: .infinity)
             }
         }
     }
 }
 
-private struct DeviceInfoSummaryGrid: View {
-    let deviceData: DeviceData
-    let cpu: CPUManagerViewModel
-    let battery: BatteryManagerViewModel
-    let gpu: GPUManagerViewModel
+// MARK: - Header
 
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-            CPUInfoCard(deviceData: deviceData, cpu: cpu)
-            MemoryInfoCard(deviceData: deviceData)
-            DiskInfoCard(deviceData: deviceData)
-            BatteryInfoCard(battery: battery)
-            GPUInfoCard(gpu: gpu)
-        }
-    }
-}
-
-private struct CPUInfoCard: View {
+private struct DashboardHeaderView: View {
     @LumiTheme private var theme
-    @ObservedObject private var deviceData: DeviceData
-    @ObservedObject private var cpu: CPUManagerViewModel
 
-    init(deviceData: DeviceData, cpu: CPUManagerViewModel) {
-        self._deviceData = ObservedObject(wrappedValue: deviceData)
-        self._cpu = ObservedObject(wrappedValue: cpu)
-    }
-
-    var body: some View {
-        DeviceInfoCard(title: pluginLocalization.string("CPU"), icon: "cpu", color: theme.info) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(deviceData.processorName.isEmpty ? String(format: pluginLocalization.string("%d cores"), deviceData.coreCount) : deviceData.processorName)
-                    .font(.appCaption)
-                    .lineLimit(1)
-                    .foregroundColor(theme.textSecondary)
-
-                Text("\(Int(deviceData.cpuUsage))%")
-                    .font(.appSectionTitle)
-                    .foregroundColor(theme.textPrimary)
-
-                ProgressView(value: deviceData.cpuUsage, total: 100)
-                    .tint(theme.info)
-
-                HStack(spacing: 12) {
-                    HStack(spacing: 4) {
-                        Text(pluginLocalization.string("User"))
-                            .font(.appCaption)
-                            .foregroundColor(theme.textSecondary)
-                        Text(String(format: "%.0f%%", cpu.userUsage))
-                            .font(.appCaption)
-                            .foregroundColor(theme.success)
-                    }
-                    HStack(spacing: 4) {
-                        Text(pluginLocalization.string("System"))
-                            .font(.appCaption)
-                            .foregroundColor(theme.textSecondary)
-                        Text(String(format: "%.0f%%", cpu.systemUsage))
-                            .font(.appCaption)
-                            .foregroundColor(theme.warning)
-                    }
-                    Spacer()
-                }
-            }
-        }
-    }
-}
-
-private struct MemoryInfoCard: View {
-    @LumiTheme private var theme
-    @ObservedObject private var deviceData: DeviceData
-
-    init(deviceData: DeviceData) {
-        self._deviceData = ObservedObject(wrappedValue: deviceData)
-    }
+    @ObservedObject var deviceData: DeviceData
+    @ObservedObject var cpu: CPUManagerViewModel
+    @ObservedObject var memory: MemoryManagerViewModel
+    @ObservedObject var thermal: ThermalViewModel
+    @ObservedObject var battery: BatteryManagerViewModel
 
     var body: some View {
-        DeviceInfoCard(title: pluginLocalization.string("Memory"), icon: "memorychip", color: theme.success) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("\(memoryUsedText) / \(memoryTotalText)")
-                    .font(.appCaption)
-                    .foregroundColor(theme.textSecondary)
+        let health = DashboardHealthFactory.make(
+            deviceData: deviceData,
+            cpu: cpu,
+            memory: memory,
+            thermal: thermal,
+            battery: battery
+        )
 
-                ProgressView(value: deviceData.memoryUsage, total: 1.0)
-                    .tint(theme.info)
-            }
-        }
-    }
-
-    private var memoryUsedText: String {
-        ByteCountFormatter.string(fromByteCount: Int64(deviceData.memoryUsed), countStyle: .memory)
-    }
-
-    private var memoryTotalText: String {
-        ByteCountFormatter.string(fromByteCount: Int64(deviceData.memoryTotal), countStyle: .memory)
-    }
-}
-
-private struct DiskInfoCard: View {
-    @LumiTheme private var theme
-    @ObservedObject private var deviceData: DeviceData
-
-    init(deviceData: DeviceData) {
-        self._deviceData = ObservedObject(wrappedValue: deviceData)
-    }
-
-    var body: some View {
-        DeviceInfoCard(title: pluginLocalization.string("Disk"), icon: "internaldrive", color: theme.warning) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("\(diskUsedText) \(pluginLocalization.string("used"))")
-                    .font(.appCaption)
-                    .foregroundColor(theme.textSecondary)
-
-                ProgressView(
-                    value: Double(deviceData.diskUsed),
-                    total: max(Double(deviceData.diskTotal), 1)
+        HStack(spacing: 12) {
+            Image(systemName: "laptopcomputer")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(theme.primary)
+                .frame(width: 40, height: 40)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(theme.primary.opacity(0.12))
                 )
-                .tint(theme.info)
 
-                Text(diskTotalText)
-                    .font(.appCaption)
-                    .foregroundColor(theme.textTertiary)
-            }
-        }
-    }
-
-    private var diskUsedText: String {
-        ByteCountFormatter.string(fromByteCount: deviceData.diskUsed, countStyle: .file)
-    }
-
-    private var diskTotalText: String {
-        ByteCountFormatter.string(fromByteCount: deviceData.diskTotal, countStyle: .file)
-    }
-}
-
-private struct BatteryInfoCard: View {
-    @LumiTheme private var theme
-    @ObservedObject private var battery: BatteryManagerViewModel
-
-    init(battery: BatteryManagerViewModel) {
-        self._battery = ObservedObject(wrappedValue: battery)
-    }
-
-    var body: some View {
-        DeviceInfoCard(title: pluginLocalization.string("Battery"), icon: batteryIcon, color: batteryLevelColor) {
-            VStack(alignment: .leading, spacing: 8) {
-                if battery.hasBattery {
-                    HStack {
-                        Text("\(Int(battery.level * 100))%")
-                            .font(.appSectionTitle)
-                            .foregroundColor(theme.textPrimary)
-                        Spacer()
-                        if battery.isCharging {
-                            Image(systemName: "bolt.fill")
-                                .foregroundColor(theme.warning)
-                        }
-                    }
-
-                    ProgressView(value: battery.level)
-                        .tint(batteryLevelColor)
-
-                    HStack(spacing: 12) {
-                        if battery.healthPercentage > 0 {
-                            Label {
-                                Text("\(Int(battery.healthPercentage))%")
-                                    .font(.appCaption)
-                            } icon: {
-                                Image(systemName: "heart.fill")
-                                    .font(.appCaption)
-                            }
-                            .foregroundColor(batteryHealthColor)
-                        }
-                        if battery.cycleCount > 0 {
-                            Label {
-                                Text(String(format: pluginLocalization.string("%d cycles"), battery.cycleCount))
-                                    .font(.appCaption)
-                            } icon: {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.appCaption)
-                            }
-                            .foregroundColor(theme.textSecondary)
-                        }
-                    }
-                } else {
-                    HStack {
-                        Image(systemName: "powerplug.fill")
-                            .foregroundColor(theme.success)
-                        Text(pluginLocalization.string("AC Power"))
-                            .font(.appBody)
-                            .foregroundColor(theme.textPrimary)
-                        Spacer()
-                    }
-                    if battery.adapterWatts > 0 {
-                        Text(String(format: pluginLocalization.string("Adapter: %@"), battery.adapterWattsString))
-                            .font(.appCaption)
-                            .foregroundColor(theme.textSecondary)
-                    }
-                }
-            }
-        }
-    }
-
-    private var batteryIcon: String {
-        guard battery.hasBattery else { return "powerplug.fill" }
-        let pct = Int(battery.level * 100)
-        if battery.isCharging { return "battery.100.bolt" }
-        if pct >= 90 { return "battery.100" }
-        if pct >= 65 { return "battery.75" }
-        if pct >= 40 { return "battery.50" }
-        if pct >= 15 { return "battery.25" }
-        return "battery.0"
-    }
-
-    private var batteryLevelColor: Color {
-        guard battery.hasBattery else { return theme.success }
-        return MetricStatus.batteryLevel(battery.level).color(in: theme)
-    }
-
-    private var batteryHealthColor: Color {
-        MetricStatus.batteryHealth(battery.healthPercentage).color(in: theme)
-    }
-}
-
-private struct GPUInfoCard: View {
-    @LumiTheme private var theme
-    @ObservedObject private var gpu: GPUManagerViewModel
-
-    init(gpu: GPUManagerViewModel) {
-        self._gpu = ObservedObject(wrappedValue: gpu)
-    }
-
-    var body: some View {
-        DeviceInfoCard(title: pluginLocalization.string("GPU"), icon: "cpu", color: theme.info) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(gpu.modelName.isEmpty ? pluginLocalization.string("GPU") : gpu.modelName)
-                    .font(.appCaption)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(deviceData.deviceName)
+                    .font(.appTitle)
+                    .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
-                    .foregroundColor(theme.textSecondary)
 
-                Text(String(format: "%.0f%%", gpu.utilization))
-                    .font(.appSectionTitle)
-                    .foregroundColor(theme.textPrimary)
-
-                ProgressView(value: gpu.utilization, total: 100)
-                    .tint(theme.info)
+                Text(subtitle)
+                    .font(.appMicro)
+                    .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+
+            Spacer(minLength: 12)
+
+            healthPill(health)
         }
+    }
+
+    private var subtitle: String {
+        var parts = [deviceData.osVersion]
+        if !deviceData.processorName.isEmpty {
+            parts.append(deviceData.processorName)
+        }
+        parts.append(String(format: pluginLocalization.string("%d cores"), deviceData.coreCount))
+        return parts.joined(separator: " · ")
+    }
+
+    private func healthPill(_ health: DashboardHealth) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(health.worst.color(in: theme))
+                .frame(width: 6, height: 6)
+
+            Text(pluginLocalization.string("System status"))
+                .font(.appMicro)
+                .foregroundStyle(theme.textSecondary)
+
+            Text("·")
+                .font(.appMicro)
+                .foregroundStyle(theme.textTertiary)
+
+            Text(health.band.localizedTitle)
+                .font(.appMicroEmphasized)
+                .foregroundStyle(health.worst.color(in: theme))
+
+            Text("\(health.score)")
+                .font(.system(size: 15, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(theme.textPrimary)
+                .contentTransition(.numericText())
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(theme.surface))
+        .overlay(Capsule().stroke(theme.divider, lineWidth: 1))
     }
 }
 
-private struct ExternalVolumesView: View {
-    @LumiTheme private var theme
-    @ObservedObject private var storage: StorageManagerViewModel
+// MARK: - Hero
 
-    init(storage: StorageManagerViewModel) {
-        self._storage = ObservedObject(wrappedValue: storage)
+private struct DashboardHeroSection: View {
+    @LumiTheme private var theme
+
+    @ObservedObject var deviceData: DeviceData
+    @ObservedObject var cpu: CPUManagerViewModel
+    @ObservedObject var memory: MemoryManagerViewModel
+    @ObservedObject var gpu: GPUManagerViewModel
+    @ObservedObject var thermal: ThermalViewModel
+    @ObservedObject var battery: BatteryManagerViewModel
+    @ObservedObject var cpuHistory: DeviceHistoryViewModel<CPUDataPoint>
+    @ObservedObject var memoryHistory: DeviceHistoryViewModel<MemoryDataPoint>
+    @ObservedObject var gpuHistory: DeviceHistoryViewModel<GPUDataPoint>
+
+    let columns: Int
+
+    var body: some View {
+        let health = DashboardHealthFactory.make(
+            deviceData: deviceData,
+            cpu: cpu,
+            memory: memory,
+            thermal: thermal,
+            battery: battery
+        )
+
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(), spacing: 12, alignment: .top),
+                count: columns
+            ),
+            spacing: 12
+        ) {
+            HeroMetricCard(
+                title: pluginLocalization.string("CPU"),
+                meta: deviceData.processorName.isEmpty
+                    ? String(format: pluginLocalization.string("%d cores"), deviceData.coreCount)
+                    : deviceData.processorName,
+                valueText: "\(Int(cpu.cpuUsage.rounded()))%",
+                caption: pluginLocalization.string("Usage"),
+                detail: String(
+                    format: "%@ %.0f%% · %@ %.0f%%",
+                    pluginLocalization.string("User"),
+                    cpu.userUsage,
+                    pluginLocalization.string("System"),
+                    cpu.systemUsage
+                ),
+                progress: cpu.cpuUsage / 100,
+                color: theme.info,
+                status: MetricStatusScale.from(percentage: cpu.cpuUsage),
+                sparklineValues: sparkline(cpuHistory.recentHistory.map(\.usage)),
+                sparklineMax: 100
+            )
+
+            HeroMetricCard(
+                title: pluginLocalization.string("Memory"),
+                meta: memory.totalMemory,
+                valueText: "\(Int(memory.memoryUsagePercentage.rounded()))%",
+                caption: pluginLocalization.string("used"),
+                detail: "\(memory.usedMemory) / \(memory.totalMemory)",
+                progress: memory.memoryUsagePercentage / 100,
+                color: theme.success,
+                status: MetricStatusScale.from(percentage: memory.memoryUsagePercentage),
+                sparklineValues: sparkline(memoryHistory.recentHistory.map(\.usagePercentage)),
+                sparklineMax: 100
+            )
+
+            HeroMetricCard(
+                title: pluginLocalization.string("GPU"),
+                meta: gpu.modelName,
+                valueText: gpu.utilizationString,
+                caption: pluginLocalization.string("Usage"),
+                detail: "\(gpu.usedMemory) / \(gpu.totalMemory)",
+                progress: gpu.utilization / 100,
+                color: theme.primary,
+                status: MetricStatusScale.from(percentage: gpu.utilization),
+                sparklineValues: sparkline(gpuHistory.recentHistory.map(\.usage)),
+                sparklineMax: 100
+            )
+
+            HealthDiagnosisCard(health: health)
+        }
+    }
+
+    private func sparkline(_ values: [Double]) -> [Double] {
+        Array(values.suffix(60))
+    }
+}
+
+// MARK: - Trends
+
+private struct DashboardTrendsSection: View {
+    @LumiTheme private var theme
+
+    @ObservedObject var systemMonitor: SystemMonitorViewModel
+    @ObservedObject var thermal: ThermalViewModel
+    @ObservedObject var thermalHistory: DeviceHistoryViewModel<ThermalDataPoint>
+
+    let columns: Int
+
+    init(viewModels: DevicePluginViewModels, columns: Int) {
+        self._systemMonitor = ObservedObject(wrappedValue: viewModels.systemMonitor)
+        self._thermal = ObservedObject(wrappedValue: viewModels.thermal)
+        self._thermalHistory = ObservedObject(wrappedValue: viewModels.thermalHistory)
+        self.columns = columns
     }
 
     var body: some View {
-        if !storage.externalVolumes.isEmpty {
-            AppSettingSection(title: nil) {
-                VStack(spacing: 0) {
-                    ForEach(Array(storage.externalVolumes.enumerated()), id: \.element.id) { index, volume in
-                        AppSettingRow(
-                            title: volume.name,
-                            description: "\(volume.usedString) / \(volume.totalString)",
-                            icon: "externaldrive"
-                        ) {
-                            Text("\(volume.usagePercent)%")
-                                .font(.appBody)
-                                .fontWeight(.semibold)
-                                .foregroundColor(theme.textPrimary)
-                        }
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(), spacing: 12, alignment: .top),
+                count: columns
+            ),
+            spacing: 12
+        ) {
+            DashboardCard(
+                title: pluginLocalization.string("CPU Usage"),
+                accessory: { legend([("cpu", pluginLocalization.string("CPU"), theme.info)]) }
+            ) {
+                TrendChartView(
+                    series: [
+                        TrendSeries(
+                            id: "cpu",
+                            name: pluginLocalization.string("CPU"),
+                            color: theme.info,
+                            points: DashboardTrendData.points(
+                                systemMonitor.metrics.cpuUsage.history.map { $0 * 100 }
+                            )
+                        ),
+                    ],
+                    format: .percent,
+                    fixedMax: 100
+                )
+            }
 
-                        if index < storage.externalVolumes.count - 1 {
-                            Divider()
-                                .padding(.vertical, 8)
-                        }
+            DashboardCard(
+                title: pluginLocalization.string("Network"),
+                subtitle: pluginLocalization.string("Adaptive scale"),
+                accessory: {
+                    legend([
+                        ("download", pluginLocalization.string("Download"), theme.info),
+                        ("upload", pluginLocalization.string("Upload"), theme.primarySecondary),
+                    ])
+                }
+            ) {
+                TrendChartView(
+                    series: [
+                        TrendSeries(
+                            id: "download",
+                            name: pluginLocalization.string("Download"),
+                            color: theme.info,
+                            points: DashboardTrendData.points(systemMonitor.metrics.network.downloadHistory)
+                        ),
+                        TrendSeries(
+                            id: "upload",
+                            name: pluginLocalization.string("Upload"),
+                            color: theme.primarySecondary,
+                            points: DashboardTrendData.points(systemMonitor.metrics.network.uploadHistory)
+                        ),
+                    ],
+                    format: .rate
+                )
+            }
+
+            DashboardCard(
+                title: pluginLocalization.string("Disk I/O"),
+                subtitle: pluginLocalization.string("Adaptive scale"),
+                accessory: {
+                    legend([
+                        ("read", pluginLocalization.string("Read"), theme.info),
+                        ("write", pluginLocalization.string("Write"), theme.primarySecondary),
+                    ])
+                }
+            ) {
+                TrendChartView(
+                    series: [
+                        TrendSeries(
+                            id: "read",
+                            name: pluginLocalization.string("Read"),
+                            color: theme.info,
+                            points: DashboardTrendData.points(systemMonitor.metrics.disk.readHistory)
+                        ),
+                        TrendSeries(
+                            id: "write",
+                            name: pluginLocalization.string("Write"),
+                            color: theme.primarySecondary,
+                            points: DashboardTrendData.points(systemMonitor.metrics.disk.writeHistory)
+                        ),
+                    ],
+                    format: .rate
+                )
+            }
+
+            temperatureCard
+        }
+    }
+
+    private var temperatureCard: some View {
+        DashboardCard(
+            title: pluginLocalization.string("CPU Temperature"),
+            accessory: {
+                if let peak = thermal.peakString {
+                    Text(peak)
+                        .font(.appMonoMicro)
+                        .foregroundStyle(thermal.peakColor)
+                }
+            }
+        ) {
+            if thermal.isAvailable {
+                VStack(alignment: .leading, spacing: 8) {
+                    TrendChartView(
+                        series: [
+                            TrendSeries(
+                                id: "temperature",
+                                name: pluginLocalization.string("Peak Temperature"),
+                                color: theme.warning,
+                                points: thermalHistory.recentHistory.suffix(60).map {
+                                    TrendPoint(timestamp: $0.timestamp, value: $0.celsius)
+                                }
+                            ),
+                        ],
+                        format: .celsius
+                    )
+
+                    sensorDetails
+                }
+            } else {
+                Text(pluginLocalization.string("No temperature sensors available"))
+                    .font(.appMicro)
+                    .foregroundStyle(theme.textTertiary)
+                    .frame(maxWidth: .infinity, minHeight: 128)
+            }
+        }
+    }
+
+    private var sensorDetails: some View {
+        DisclosureGroup {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 12),
+                    GridItem(.flexible(), spacing: 12),
+                ],
+                alignment: .leading,
+                spacing: 5
+            ) {
+                ForEach(thermal.readings) { reading in
+                    HStack(spacing: 4) {
+                        Text(ThermalSensorLabel.text(index: reading.index))
+                            .font(.appMicro)
+                            .foregroundStyle(theme.textSecondary)
+
+                        Spacer(minLength: 4)
+
+                        Text(String(format: "%.1f°C", reading.celsius))
+                            .font(.appMonoMicro)
+                            .foregroundStyle(
+                                MetricStatus.cpuTemperature(reading.celsius).color(in: theme)
+                            )
                     }
                 }
             }
-            .padding(.horizontal)
+            .padding(.top, 6)
+        } label: {
+            HStack(spacing: 5) {
+                Text(pluginLocalization.string("Sensor details"))
+                    .font(.appMicro)
+                    .foregroundStyle(theme.textSecondary)
+
+                Text(String(format: pluginLocalization.string("%d sensors"), thermal.readings.count))
+                    .font(.appMonoMicro)
+                    .foregroundStyle(theme.textTertiary)
+            }
+        }
+        .tint(theme.textSecondary)
+    }
+
+    private func legend(_ entries: [(String, String, Color)]) -> some View {
+        TrendLegendView(
+            entries: entries.map { TrendLegendEntry(id: $0.0, name: $0.1, color: $0.2) }
+        )
+    }
+}
+
+// MARK: - Bottom
+
+private struct DashboardBottomSection: View {
+    @ObservedObject var deviceData: DeviceData
+    @ObservedObject var cpu: CPUManagerViewModel
+    @ObservedObject var memory: MemoryManagerViewModel
+    @ObservedObject var battery: BatteryManagerViewModel
+    @ObservedObject var storage: StorageManagerViewModel
+
+    let stacked: Bool
+
+    var body: some View {
+        if stacked {
+            VStack(spacing: 12) {
+                processCard
+                detailColumn
+            }
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                processCard
+                    .frame(maxWidth: .infinity)
+
+                detailColumn
+                    .frame(width: 340)
+            }
+        }
+    }
+
+    private var processCard: some View {
+        DashboardProcessCard(cpu: cpu, memory: memory)
+    }
+
+    private var detailColumn: some View {
+        VStack(spacing: 12) {
+            BatteryDetailCard(battery: battery)
+            StorageDetailCard(deviceData: deviceData, storage: storage)
         }
     }
 }
 
-private struct UptimeView: View {
-    @LumiTheme private var theme
-    @ObservedObject private var deviceData: DeviceData
+// MARK: - Footer
 
-    init(deviceData: DeviceData) {
-        self._deviceData = ObservedObject(wrappedValue: deviceData)
-    }
+private struct DashboardFooterView: View {
+    @LumiTheme private var theme
+
+    @ObservedObject var deviceData: DeviceData
+    @ObservedObject var thermal: ThermalViewModel
 
     var body: some View {
-        HStack {
-            Image(systemName: "clock")
-                .foregroundColor(theme.textSecondary)
+        HStack(spacing: 6) {
             Text("\(pluginLocalization.string("Uptime")): \(formatUptime(deviceData.uptime))")
-                .font(.appCaption)
-                .foregroundColor(theme.textSecondary)
-            Spacer()
+                .lineLimit(1)
+
+            if let peak = thermal.peakString {
+                Text("·")
+                Text("\(pluginLocalization.string("Peak Temperature")): \(peak)")
+                    .lineLimit(1)
+            }
+
+            if thermal.isAvailable {
+                Text("·")
+                Text(String(format: pluginLocalization.string("%d sensors"), thermal.readings.count))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            Text(pluginLocalization.string("1s refresh · 60s window"))
+                .lineLimit(1)
         }
-        .padding(.horizontal)
+        .font(.appMicro)
+        .foregroundStyle(theme.textTertiary)
+        .padding(.horizontal, 2)
     }
 
     private func formatUptime(_ interval: TimeInterval) -> String {
@@ -383,39 +516,45 @@ private struct UptimeView: View {
     }
 }
 
-// MARK: - Device Info Card
+// MARK: - Data
 
-private struct DeviceInfoCard<Content: View>: View {
-    @LumiTheme private var theme
+@MainActor
+private enum DashboardHealthFactory {
+    static func make(
+        deviceData: DeviceData,
+        cpu: CPUManagerViewModel,
+        memory: MemoryManagerViewModel,
+        thermal: ThermalViewModel,
+        battery: BatteryManagerViewModel
+    ) -> DashboardHealth {
+        let batteryHealth: Double? = battery.hasBattery && battery.healthPercentage > 0
+            ? battery.healthPercentage
+            : nil
 
-    let title: String
-    let icon: String
-    let color: Color
-    let content: Content
-
-    init(title: String, icon: String, color: Color, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.icon = icon
-        self.color = color
-        self.content = content()
+        return DashboardHealth(
+            cpuPercent: cpu.cpuUsage,
+            memoryPercent: memory.memoryUsagePercentage,
+            thermalCelsius: thermal.peakCelsius,
+            batteryHealth: batteryHealth,
+            diskFreeBytes: max(0, deviceData.diskTotal - deviceData.diskUsed),
+            diskTotalBytes: deviceData.diskTotal
+        )
     }
+}
 
-    var body: some View {
-        AppSettingSection(title: nil) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: icon)
-                        .font(.appCaption)
-                        .foregroundStyle(color)
-                    Text(title)
-                        .font(.appCaption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(theme.textSecondary)
-                    Spacer()
-                }
-
-                content
-            }
+private enum DashboardTrendData {
+    /// 网络 / 磁盘历史只保存数值，按 1s 采样合成时间戳，与 60s 窗口对齐。
+    static func points(
+        _ values: [Double],
+        endingAt now: TimeInterval = Date().timeIntervalSince1970
+    ) -> [TrendPoint] {
+        guard !values.isEmpty else { return [] }
+        let count = values.count
+        return values.enumerated().map { index, value in
+            TrendPoint(
+                timestamp: now - Double(count - 1 - index),
+                value: value
+            )
         }
     }
 }

@@ -49,6 +49,6 @@ final class ThermalViewModel: ObservableObject {
     /// 最高温度对应的状态色。
     var peakColor: Color {
         guard let peakCelsius else { return .secondary }
-        return MetricStatus.temperature(peakCelsius).themeColor
+        return MetricStatus.cpuTemperature(peakCelsius).themeColor
     }
 }

@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// 不直接携带颜色——颜色由 `LumiTheme` 解析,这样状态色会跟随当前主题
 /// (Lumi / Aurora / Dracula …),而不是写死成 SwiftUI 的 `.green/.orange/.red`。
-public enum MetricStatus {
+public enum MetricStatus: Equatable, Sendable {
     /// 正常(低占用 / 电量充足 / 温度低)
     case normal
     /// 警告(中占用 / 电量偏低 / 温度偏高)
@@ -87,5 +87,21 @@ extension MetricStatus {
         if temp < 60 { return .normal }
         if temp < 80 { return .warning }
         return .critical
+    }
+
+    /// CPU / die 峰值温度(℃)→状态。<70 normal,<85 warning,否则 critical。
+    ///
+    /// 电池温度阈值(35/45)明显低于 CPU 结温,不能复用。
+    public static func cpuTemperature(_ temp: Double) -> MetricStatus {
+        if temp < 70 { return .normal }
+        if temp < 85 { return .warning }
+        return .critical
+    }
+
+    /// 磁盘可用空间占比(0–100)→状态。<5 critical,<10 warning,否则 normal。
+    public static func diskFree(_ percent: Double) -> MetricStatus {
+        if percent < 5 { return .critical }
+        if percent < 10 { return .warning }
+        return .normal
     }
 }

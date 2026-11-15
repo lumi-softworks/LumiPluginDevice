@@ -3,7 +3,7 @@ import LumiUI
 import SwiftUI
 
 /// 进程榜单的指标口径。
-enum ProcessMetricKind {
+enum ProcessMetricKind: Hashable {
     case cpu
     case memory
 }
