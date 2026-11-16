@@ -49,14 +49,8 @@ public struct DeviceInfoMenuBarPopupView: View {
 
     private var liveCpuView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // 紧凑指标行:使用率 + 温度 + 开机时长(标题与数值并排,提高信息密度)
+            // 紧凑指标行:温度 + 开机时长(标题与数值并排,提高信息密度)
             HStack(spacing: 10) {
-                metric(
-                    label: pluginLocalization.string("Usage"),
-                    value: String(format: "%.1f%%", viewModel.cpuUsage),
-                    color: cpuColor
-                )
-
                 metric(
                     label: pluginLocalization.string("Temperature"),
                     value: temperatureText,
@@ -93,7 +87,7 @@ public struct DeviceInfoMenuBarPopupView: View {
             }
             .frame(height: 6)
 
-            // CPU usage breakdown: User / System
+            // CPU usage breakdown: User / System / Idle + total usage on the right
             HStack(spacing: 8) {
                 HStack(spacing: 3) {
                     Circle()
@@ -119,6 +113,10 @@ public struct DeviceInfoMenuBarPopupView: View {
                         .font(.system(size: 9))
                         .foregroundColor(.secondary)
                 }
+                Spacer(minLength: 0)
+                Text(String(format: "%.1f%%", viewModel.cpuUsage))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(cpuColor)
             }
         }
         .padding(10)
