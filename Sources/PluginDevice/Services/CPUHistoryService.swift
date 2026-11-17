@@ -29,6 +29,10 @@ public final class CPUHistoryService: ObservableObject, SuperLog {
     private let fileManager = FileManager.default
     private let storageFileURLOverride: URL?
 
+    /// 磁盘缓存尚未恢复完成时为 true：期间跳过保存，避免启动窗口里
+    /// 只含少量采样的空缓冲把 30 天缓存覆盖掉（#1207）。
+    private var isRestoringHistory = true
+
     /// Storage file URL. Configurable for testing.
     public var storageFileURL: URL? {
         if let storageFileURLOverride { return storageFileURLOverride }
@@ -47,7 +51,17 @@ public final class CPUHistoryService: ObservableObject, SuperLog {
     package init(storageFileURL: URL? = nil) {
         self.storageFileURLOverride = storageFileURL
         createStorageDirectoryIfNeeded()
-        loadHistory()
+        // 读取与解码离开主 actor：43,200 点的 JSON 在启动路径上同步解码
+        // 会阻塞插件 boot 的 UI 配置（#1207）。boot 先以空历史运行，
+        // 缓存就绪后回主 actor 合并发布。
+        let url = storageFileURL
+        let quarantineURL = corruptStorageFileURL
+        Task.detached(priority: .utility) {
+            let loaded = Self.readPersistedHistory(at: url, quarantineTo: quarantineURL)
+            await MainActor.run { [weak self] in
+                self?.applyLoadedHistory(loaded)
+            }
+        }
     }
 
     // MARK: - Public Methods
@@ -142,6 +156,7 @@ public final class CPUHistoryService: ObservableObject, SuperLog {
 
     @discardableResult
     func saveHistory() -> Task<Bool, Never>? {
+        guard !isRestoringHistory else { return nil }
         let historyToSave = longTermHistory
         let url = storageFileURL
         guard let url else { return nil }
@@ -161,21 +176,51 @@ public final class CPUHistoryService: ObservableObject, SuperLog {
         }
     }
 
-    func loadHistory() {
-        let url = storageFileURL
+    /// 把磁盘历史合并进当前缓冲并解除保存封锁。
+    ///
+    /// boot 窗口内可能已有采样点写入长期历史（跨分钟边界时结算），
+    /// 磁盘数据整体放在最前、保留启动窗口的点在其后，时间顺序不变，
+    /// 不得用磁盘数组直接覆盖（#1207）。
+    func applyLoadedHistory(_ loaded: [CPUDataPoint]) {
+        isRestoringHistory = false
+        guard !loaded.isEmpty else { return }
+
+        longTermHistory = loaded + longTermHistory
+        if longTermHistory.count > maxLongTermPoints {
+            longTermHistory.removeFirst(longTermHistory.count - maxLongTermPoints)
+        }
+    }
+
+    /// 在非主线程读取并解码持久化历史；解码失败时隔离文件。
+    /// 任何失败都返回空数组，保持「读不到就空启动」的语义。
+    private nonisolated static func readPersistedHistory(at url: URL?, quarantineTo: URL?) -> [CPUDataPoint] {
         guard let url,
               FileManager.default.fileExists(atPath: url.path) else {
-            return
+            return []
         }
 
         do {
             let data = try Data(contentsOf: url)
             let history = try JSONDecoder().decode([CPUDataPoint].self, from: data)
             let cutoff = Date().timeIntervalSince1970 - CPUTimeRange.month1.duration
-            longTermHistory = history.filter { $0.timestamp >= cutoff }
+            return history.filter { $0.timestamp >= cutoff }
         } catch {
             Self.logger.error("\(Self.t)Load CPU history failed: \(error.localizedDescription)")
-            quarantineCorruptHistory()
+            if let quarantineTo {
+                quarantineHistory(at: url, to: quarantineTo)
+            }
+            return []
+        }
+    }
+
+    private nonisolated static func quarantineHistory(at sourceURL: URL, to quarantineURL: URL) {
+        do {
+            if FileManager.default.fileExists(atPath: quarantineURL.path) {
+                try FileManager.default.removeItem(at: quarantineURL)
+            }
+            try FileManager.default.moveItem(at: sourceURL, to: quarantineURL)
+        } catch {
+            Self.logger.error("\(Self.t)Quarantine corrupt CPU history failed: \(error.localizedDescription)")
         }
     }
 
@@ -189,23 +234,6 @@ public final class CPUHistoryService: ObservableObject, SuperLog {
             } catch {
                 Self.logger.error("\(Self.t)Create CPU history directory failed: \(error.localizedDescription)")
             }
-        }
-    }
-
-    private func quarantineCorruptHistory() {
-        guard let sourceURL = storageFileURL,
-              let quarantineURL = corruptStorageFileURL,
-              fileManager.fileExists(atPath: sourceURL.path) else {
-            return
-        }
-
-        do {
-            if fileManager.fileExists(atPath: quarantineURL.path) {
-                try fileManager.removeItem(at: quarantineURL)
-            }
-            try fileManager.moveItem(at: sourceURL, to: quarantineURL)
-        } catch {
-            Self.logger.error("\(Self.t)Quarantine corrupt CPU history failed: \(error.localizedDescription)")
         }
     }
 }

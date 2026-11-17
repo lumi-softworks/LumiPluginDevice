@@ -5,7 +5,7 @@
 PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内存 / GPU / 电池 / 存储）与历史趋势， 支持主内容视图、菜单栏图表、设置页与文档页等贡献点。
 
 平台: macOS 14+, iOS 17+
-测试文件: 16 个，用例总数: 83
+测试文件: 17 个，用例总数: 87
 
 核心组件（源码目录）:
 - `Models/`
@@ -140,25 +140,30 @@ PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内�
 | 81 | 内存统计 | 概览实时路径与弹窗 MemoryService 同 flavor | 真实 host_statistics64 调用 | 调用 currentMemoryUsage | used 在 (0, total] 内且 total 为物理内存 | P1 | ✅ 已覆盖 | `liveMemoryUsageIsSane` |
 | 82 | 存储卷交付 | 每次扫描必须交付本轮外置卷列表（**回归 #793**） | 独立 StorageService 实例 | 订阅 $externalVolumes 后连续两次 scanVolumes | 两次交付且值与本轮属性一致 | P0 | ✅ 已覆盖 | `eachScanDeliversCurrentRound` |
 | 83 | 存储卷交付 | 订阅即回放当前扫描结果 | 独立 StorageService 实例 | 订阅 $externalVolumes 取首值 | 首个交付等于当前 externalVolumes | P1 | ✅ 已覆盖 | `subscriptionReplaysCurrentVolumes` |
+| 84 | CPU 历史恢复 | boot 必须以空历史先返回，磁盘缓存随后异步恢复（**回归 #1207**） | 带两点的缓存文件 | 构造 CPUHistoryService 并等待恢复 | init 返回时缓冲为空，恢复后与磁盘数组一致 | P0 | ✅ 已覆盖 | `bootRestoresCacheAsynchronously` |
+| 85 | CPU 历史恢复 | 损坏缓存被隔离且历史保持为空 | 写入非法 JSON 的缓存文件 | 构造 CPUHistoryService 并等待隔离 | 隔离文件出现、源文件移除、缓冲为空 | P0 | ✅ 已覆盖 | `corruptCacheIsQuarantined` |
+| 86 | CPU 历史恢复 | 恢复的磁盘数据必须与启动窗口的采样点合并，不得覆盖 | 独立服务实例 | 先写入启动窗口的点再 applyLoadedHistory | 时间顺序为磁盘数据在前、启动点在后 | P1 | ✅ 已覆盖 | `restoredCacheMergesWithBootWindowPoints` |
+| 87 | CPU 历史恢复 | 恢复完成前保存必须被封锁，不得用空缓冲覆盖缓存 | 带两点的缓存文件 | 恢复落位前结算并保存 | saveHistory 返回 nil，磁盘文件未被覆盖，恢复后三点齐全 | P0 | ✅ 已覆盖 | `savesAreSkippedWhileRestoring` |
 
-> 说明：全部 **83 条场景**已在本包 `swift test` 中实跑通过。
+> 说明：全部 **87 条场景**已在本包 `swift test` 中实跑通过。
 >
 > 变异验证（#1210/#1209）：M1 删除 CPUService 采样完成块的原子 `usageSnapshot` 赋值 → `samplingTickPublishesExactlyOneAtomicSnapshot` 转红（快照数为 0）；M2 交换 `applyRecent`/`applyLongTerm` 的缓存失效谓词 → `recentUpdateInvalidatesHighResolutionCache`、`longTermUpdateRepublishesAndInvalidatesLongRangeCache` 转红（缓存未失效返回旧结果）；M3 在 `applyRecent` 中追加 `longTermHistory = longTermHistory` 模拟 combineLatest → `recentOnlyUpdateDoesNotRepublishLongTermHistory` 转红（发布数 2）。
-> 变异验证（#649/#793）：M4 删除 `usedMemoryBytes` 的 compressed 项 → `usedMemoryIncludesCompressorPages` 转红；M5 删除 `scanVolumes` 的 `externalVolumes` 赋值 → `eachScanDeliversCurrentRound` 转红（交付数 0）。以上变异均单独施加并确认转红后还原，最终全量 `swift test` 全绿（82 用例）。
+> 变异验证（#649/#793）：M4 删除 `usedMemoryBytes` 的 compressed 项 → `usedMemoryIncludesCompressorPages` 转红；M5 删除 `scanVolumes` 的 `externalVolumes` 赋值 → `eachScanDeliversCurrentRound` 转红（交付数 0）。
+> 变异验证（#1207）：M6 `applyLoadedHistory` 改为直接覆盖 → `restoredCacheMergesWithBootWindowPoints`、`savesAreSkippedWhileRestoring` 转红（启动窗口点丢失）；M7 删除 `saveHistory` 的恢复期封锁 → `savesAreSkippedWhileRestoring` 转红（封锁断言 saveHistory == nil 失败）。以上变异均单独施加并确认转红后还原，最终全量 `swift test` 全绿（86 用例）。
 > #792 的匹配键修复以运行时取证验证：数字键字典返回 165 个事件服务，命名键 `PrimaryUsagePage`/`PrimaryUsage` 返回 57 个温度服务，修复后传感器下标 0...56（与 issue 审计机的预期一致）。
 > 用例名与描述取自 `Tests/` 下的真实 `@Test` 声明，改动测试时须同步本表。
 
 ## 覆盖率统计
 
-- P0: 已覆盖 14 / 14
-- P1: 已覆盖 50 / 50
+- P0: 已覆盖 17 / 17
+- P1: 已覆盖 51 / 51
 - P2: 已覆盖 19 / 19
-- **合计: 83 / 83**（仅表示清单场景，非源码覆盖率）
+- **合计: 87 / 87**（仅表示清单场景，非源码覆盖率）
 
 ## 优先级说明
 
-- **P0**: 描述/名称含崩溃、泄漏、截断、丢失、竞态、超时、必须、不得、重试等失效类信号的用例（14 条）
-- **P1**: 其余功能性用例（50 条）
+- **P0**: 描述/名称含崩溃、泄漏、截断、丢失、竞态、超时、必须、不得、重试等失效类信号的用例（17 条）
+- **P1**: 其余功能性用例（51 条）
 - **P2**: 稳定常量、占位、文案、空集合等边界用例（19 条）
 
 ## 跨平台说明
