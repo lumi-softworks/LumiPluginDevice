@@ -94,7 +94,9 @@ struct CPUHistoryDetailView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        VStack(spacing: 2) {
+                        // 懒加载容器：进程榜单每秒都在变，非懒加载会把
+                        // 视口外的每一行都在 1Hz 更新里重新物化（#1306）。
+                        LazyVStack(spacing: 2) {
                             ForEach(processViewModel.topProcesses) { metric in
                                 ProcessMetricRow(process: metric)
                             }

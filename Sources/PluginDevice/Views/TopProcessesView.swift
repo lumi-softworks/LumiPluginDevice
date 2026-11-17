@@ -122,9 +122,28 @@ struct ProcessMetricRow: View {
         .padding(.vertical, 3)
     }
 
+    /// 按 bundle 路径缓存进程图标：榜单每秒发布一次，非缓存时每行每次
+    /// body 求值都会走一遍 `NSWorkspace.icon(forFile:)`（#1306）。
+    /// NSCache 本身线程安全，可安全跨并发域共享。
+    struct ProcessIconCache: @unchecked Sendable {
+        static let shared = ProcessIconCache()
+
+        private let cache = NSCache<NSString, NSImage>()
+
+        func image(forPath path: String) -> NSImage {
+            let key = path as NSString
+            if let cached = cache.object(forKey: key) {
+                return cached
+            }
+            let icon = NSWorkspace.shared.icon(forFile: path)
+            cache.setObject(icon, forKey: key)
+            return icon
+        }
+    }
+
     private func iconForProcess(_ process: ProcessMetric) -> Image {
         if let path = process.icon {
-            return Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+            return Image(nsImage: ProcessIconCache.shared.image(forPath: path))
         }
         return Image(systemName: "terminal")
     }
