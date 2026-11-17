@@ -44,18 +44,22 @@ int LumiReadThermalSensors(void *context, LumiThermalSensorCallback callback) {
         if (client == NULL) return 0;
 
         // 将服务集限定到 PMU 温度传感器(usage page 0xFF00, usage 5)。
+        // 匹配键必须用命名键 PrimaryUsagePage / PrimaryUsage:若把 0xFF00
+        // 本身当数字键,字典不会过滤任何服务,下标会落进未过滤的事件服务
+        // 数组,编号与 Device / Die / Surface 分组随之错乱(#792)。
         int32_t page = LUMI_HID_PAGE_TEMPERATURE;
         int32_t usage = LUMI_HID_USAGE_TEMPERATURE;
-        CFNumberRef key = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &page);
-        CFNumberRef value = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &usage);
+        CFNumberRef pageValue = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &page);
+        CFNumberRef usageValue = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &usage);
         CFMutableDictionaryRef matching = CFDictionaryCreateMutable(
             kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        if (key != NULL && value != NULL && matching != NULL) {
-            CFDictionarySetValue(matching, key, value);
+        if (pageValue != NULL && usageValue != NULL && matching != NULL) {
+            CFDictionarySetValue(matching, CFSTR("PrimaryUsagePage"), pageValue);
+            CFDictionarySetValue(matching, CFSTR("PrimaryUsage"), usageValue);
             IOHIDEventSystemClientSetMatching(client, matching);
         }
-        if (key != NULL) CFRelease(key);
-        if (value != NULL) CFRelease(value);
+        if (pageValue != NULL) CFRelease(pageValue);
+        if (usageValue != NULL) CFRelease(usageValue);
         if (matching != NULL) CFRelease(matching);
 
         CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
