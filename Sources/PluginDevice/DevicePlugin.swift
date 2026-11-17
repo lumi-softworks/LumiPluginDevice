@@ -124,7 +124,7 @@ public final class DevicePlugin: SuperPlugin, SuperLog {
                 ActivityBarItem(
                     id: entryID,
                     title: localize("Device Info"),
-                    systemImage: "gauge.with.dots.needle.50percent",
+                    systemImage: "laptopcomputer",
                     order: order,
                     ownerPluginID: id
                 ) { state in
