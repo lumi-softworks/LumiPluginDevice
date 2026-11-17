@@ -5,7 +5,7 @@
 PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内存 / GPU / 电池 / 存储）与历史趋势， 支持主内容视图、菜单栏图表、设置页与文档页等贡献点。
 
 平台: macOS 14+, iOS 17+
-测试文件: 14 个，用例总数: 78
+测试文件: 16 个，用例总数: 83
 
 核心组件（源码目录）:
 - `Models/`
@@ -135,24 +135,31 @@ PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内�
 | 76 | 历史视图模型 | recent-only 更新不得重复发布长期缓冲（**回归 #1209**） | 已有长期缓冲 | 两次 applyRecent | longTermHistory 发布数为 0 | P0 | ✅ 已覆盖 | `recentOnlyUpdateDoesNotRepublishLongTermHistory` |
 | 77 | 历史视图模型 | 长期缓冲更新后发布并失效长期范围缓存（**回归 #1209**） | 已缓存 30 天结果 | applyLongTerm 追加一个点 | 发布 1 次且 30 天结果反映新点 | P1 | ✅ 已覆盖 | `longTermUpdateRepublishesAndInvalidatesLongRangeCache` |
 | 78 | 历史视图模型 | 高频缓冲更新后失效小时范围缓存（**回归 #1209**） | 已缓存 1 小时结果 | applyRecent 追加一个点 | 1 小时结果反映新点 | P1 | ✅ 已覆盖 | `recentUpdateInvalidatesHighResolutionCache` |
+| 79 | 内存统计 | 概览内存必须计入压缩内存页（**回归 #649**） | 构造 vm_statistics64 | 注入非零 compressor_page_count | used = active + wired + compressed | P0 | ✅ 已覆盖 | `usedMemoryIncludesCompressorPages` |
+| 80 | 内存统计 | 无压缩页时 used 为 active 与 wired 之和 | 构造 vm_statistics64 | compressor_page_count = 0 | used = active + wired | P2 | ✅ 已覆盖 | `usedMemoryWithoutCompressorPages` |
+| 81 | 内存统计 | 概览实时路径与弹窗 MemoryService 同 flavor | 真实 host_statistics64 调用 | 调用 currentMemoryUsage | used 在 (0, total] 内且 total 为物理内存 | P1 | ✅ 已覆盖 | `liveMemoryUsageIsSane` |
+| 82 | 存储卷交付 | 每次扫描必须交付本轮外置卷列表（**回归 #793**） | 独立 StorageService 实例 | 订阅 $externalVolumes 后连续两次 scanVolumes | 两次交付且值与本轮属性一致 | P0 | ✅ 已覆盖 | `eachScanDeliversCurrentRound` |
+| 83 | 存储卷交付 | 订阅即回放当前扫描结果 | 独立 StorageService 实例 | 订阅 $externalVolumes 取首值 | 首个交付等于当前 externalVolumes | P1 | ✅ 已覆盖 | `subscriptionReplaysCurrentVolumes` |
 
-> 说明：全部 **78 条场景**已在本包 `swift test` 中实跑通过。
+> 说明：全部 **83 条场景**已在本包 `swift test` 中实跑通过。
 >
-> 变异验证（#1210/#1209）：M1 删除 CPUService 采样完成块的原子 `usageSnapshot` 赋值 → `samplingTickPublishesExactlyOneAtomicSnapshot` 转红（快照数为 0）；M2 交换 `applyRecent`/`applyLongTerm` 的缓存失效谓词 → `recentUpdateInvalidatesHighResolutionCache`、`longTermUpdateRepublishesAndInvalidatesLongRangeCache` 转红（缓存未失效返回旧结果）；M3 在 `applyRecent` 中追加 `longTermHistory = longTermHistory` 模拟 combineLatest → `recentOnlyUpdateDoesNotRepublishLongTermHistory` 转红（发布数 2）。三处变异均单独施加并确认转红后还原，最终全量 `swift test` 全绿。
+> 变异验证（#1210/#1209）：M1 删除 CPUService 采样完成块的原子 `usageSnapshot` 赋值 → `samplingTickPublishesExactlyOneAtomicSnapshot` 转红（快照数为 0）；M2 交换 `applyRecent`/`applyLongTerm` 的缓存失效谓词 → `recentUpdateInvalidatesHighResolutionCache`、`longTermUpdateRepublishesAndInvalidatesLongRangeCache` 转红（缓存未失效返回旧结果）；M3 在 `applyRecent` 中追加 `longTermHistory = longTermHistory` 模拟 combineLatest → `recentOnlyUpdateDoesNotRepublishLongTermHistory` 转红（发布数 2）。
+> 变异验证（#649/#793）：M4 删除 `usedMemoryBytes` 的 compressed 项 → `usedMemoryIncludesCompressorPages` 转红；M5 删除 `scanVolumes` 的 `externalVolumes` 赋值 → `eachScanDeliversCurrentRound` 转红（交付数 0）。以上变异均单独施加并确认转红后还原，最终全量 `swift test` 全绿（82 用例）。
+> #792 的匹配键修复以运行时取证验证：数字键字典返回 165 个事件服务，命名键 `PrimaryUsagePage`/`PrimaryUsage` 返回 57 个温度服务，修复后传感器下标 0...56（与 issue 审计机的预期一致）。
 > 用例名与描述取自 `Tests/` 下的真实 `@Test` 声明，改动测试时须同步本表。
 
 ## 覆盖率统计
 
-- P0: 已覆盖 12 / 12
-- P1: 已覆盖 48 / 48
-- P2: 已覆盖 18 / 18
-- **合计: 78 / 78**（仅表示清单场景，非源码覆盖率）
+- P0: 已覆盖 14 / 14
+- P1: 已覆盖 50 / 50
+- P2: 已覆盖 19 / 19
+- **合计: 83 / 83**（仅表示清单场景，非源码覆盖率）
 
 ## 优先级说明
 
-- **P0**: 描述/名称含崩溃、泄漏、截断、丢失、竞态、超时、必须、不得、重试等失效类信号的用例（12 条）
-- **P1**: 其余功能性用例（48 条）
-- **P2**: 稳定常量、占位、文案、空集合等边界用例（18 条）
+- **P0**: 描述/名称含崩溃、泄漏、截断、丢失、竞态、超时、必须、不得、重试等失效类信号的用例（14 条）
+- **P1**: 其余功能性用例（50 条）
+- **P2**: 稳定常量、占位、文案、空集合等边界用例（19 条）
 
 ## 跨平台说明
 

@@ -8,8 +8,8 @@ import Foundation
 final class StorageManagerViewModel: ObservableObject {
     @Published private(set) var externalVolumes: [VolumeInfo] = []
 
-    func apply(_ service: StorageService) {
-        externalVolumes = service.externalVolumes
+    func apply(_ volumes: [VolumeInfo]) {
+        externalVolumes = volumes
     }
 }
 

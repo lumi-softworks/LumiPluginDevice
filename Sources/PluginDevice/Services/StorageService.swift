@@ -62,7 +62,8 @@ public final class StorageService: ObservableObject, SuperLog {
 
     // MARK: - Volume Scanning
 
-    private func scanVolumes() {
+    /// 触发一次卷扫描（测试直接驱动扫描用；正式路径由监控定时器调用）。
+    func scanVolumes() {
         let result = Self.detectVolumes()
         self.rootVolume = result.rootVolume
         self.externalVolumes = result.externalVolumes

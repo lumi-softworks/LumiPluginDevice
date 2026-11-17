@@ -80,8 +80,11 @@ final class DeviceMetricsObserver {
         BatteryService.shared.objectWillChange
             .sink { [weak self] in self?.viewModels.battery.apply(BatteryService.shared) }
             .store(in: &cancellables)
-        StorageService.shared.objectWillChange
-            .sink { [weak self] in self?.viewModels.storage.apply(StorageService.shared) }
+        // 用 `$externalVolumes` 订阅而非 `objectWillChange`：后者在属性写入
+        // 「之前」触发，同步读取读到的是上一轮扫描的卷列表，挂载/推出/容量
+        // 变化都会延迟一轮（#793）。订阅即回放当前值，替代单独的初始 apply。
+        StorageService.shared.$externalVolumes
+            .sink { [weak self] volumes in self?.viewModels.storage.apply(volumes) }
             .store(in: &cancellables)
         SystemMonitorService.shared.$currentMetrics
             .sink { [weak self] metrics in self?.viewModels.systemMonitor.apply(metrics) }
@@ -137,7 +140,6 @@ final class DeviceMetricsObserver {
         viewModels.deviceData.updateDynamicData()
         viewModels.gpu.apply(GPUService.shared)
         viewModels.battery.apply(BatteryService.shared)
-        viewModels.storage.apply(StorageService.shared)
         viewModels.systemMonitor.apply(SystemMonitorService.shared.currentMetrics)
     }
 
