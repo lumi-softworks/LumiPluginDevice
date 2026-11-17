@@ -127,6 +127,13 @@ class DeviceData: ObservableObject {
     }
 
     private nonisolated func getMemoryData() -> (used: UInt64, total: UInt64) {
+        Self.currentMemoryUsage()
+    }
+
+    /// 概览卡片的内存统计入口。与 MemoryService 弹窗一致使用 `HOST_VM_INFO64`：
+    /// `HOST_VM_INFO` 虽然成功返回，但不填充 `compressor_page_count`，
+    /// 压缩内存被整体漏算，占用被显著低估（#649）。
+    nonisolated static func currentMemoryUsage() -> (used: UInt64, total: UInt64) {
         var pageSize: vm_size_t = 0
         host_page_size(mach_host_self(), &pageSize)
 
@@ -135,22 +142,22 @@ class DeviceData: ObservableObject {
 
         let result = withUnsafeMutablePointer(to: &stats) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO, $0, &count)
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
             }
         }
 
         let total = ProcessInfo.processInfo.physicalMemory
 
-        if result == KERN_SUCCESS {
-            let active = UInt64(stats.active_count) * UInt64(pageSize)
-            let wired = UInt64(stats.wire_count) * UInt64(pageSize)
-            let compressed = UInt64(stats.compressor_page_count) * UInt64(pageSize)
-            // Approximate "Used" memory as App Memory (Active) + Wired + Compressed
-            let used = active + wired + compressed
-            return (used, total)
-        }
+        guard result == KERN_SUCCESS else { return (0, total) }
+        return (usedMemoryBytes(from: stats, pageSize: pageSize), total)
+    }
 
-        return (0, total)
+    /// App Memory（Active）+ Wired + 压缩内存。
+    nonisolated static func usedMemoryBytes(from stats: vm_statistics64, pageSize: vm_size_t) -> UInt64 {
+        let active = UInt64(stats.active_count) * UInt64(pageSize)
+        let wired = UInt64(stats.wire_count) * UInt64(pageSize)
+        let compressed = UInt64(stats.compressor_page_count) * UInt64(pageSize)
+        return active + wired + compressed
     }
 
     private nonisolated func getDiskData() -> (total: Int64, used: Int64) {
