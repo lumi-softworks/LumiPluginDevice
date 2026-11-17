@@ -100,16 +100,18 @@ public final class DevicePlugin: SuperPlugin, SuperLog {
     }
 
     public func onBoot(kernel: KernelCoreContainer) throws {
-        let viewModels = DevicePluginViewModels()
-        self.viewModels = viewModels
-        startMetricsObserver(viewModels: viewModels)
-
-        // 0. 配置历史服务的存储目录
+        // 0. 配置历史服务的存储目录（必须先于 MetricsObserver 创建）。
+        //    Observer 的首次 Combine 发射会访问 MemoryHistoryService.shared，
+        //    单例在目录就绪前创建将读不到磁盘上的历史（#383）。
         if let storage = kernel.resolveProvider((any StorageProviding).self) {
             let pluginStorageDir = storage.pluginDataDirectory(for: id)
             MemoryHistoryService.configure(storageDirectory: pluginStorageDir)
             ThermalHistoryService.configure(storageDirectory: pluginStorageDir)
         }
+
+        let viewModels = DevicePluginViewModels()
+        self.viewModels = viewModels
+        startMetricsObserver(viewModels: viewModels)
 
         // 1. 注册 ActivityBar 入口；入口被激活时由插件切换自己的主内容，
         //    并隐藏侧边栏 Rail（本插件不贡献 Rail 内容，直接全屏展示主视图）。

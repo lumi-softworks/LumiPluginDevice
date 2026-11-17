@@ -156,6 +156,28 @@ struct PluginDeviceTests {
         try kernel.stop()
     }
 
+    @Test("目录注入后补载已持久化的内存历史（回归 #383）")
+    func configureReloadsPersistedMemoryHistory() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumi-383-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let point = MemoryDataPoint(
+            timestamp: Date().timeIntervalSince1970 - 60,
+            usagePercentage: 55,
+            usedBytes: 100
+        )
+        try JSONEncoder().encode([point])
+            .write(to: dir.appendingPathComponent("memory_history.json"), options: .atomic)
+
+        // 先访问单例，模拟 Observer 抢在目录配置前创建 shared 的场景（#383）。
+        _ = MemoryHistoryService.shared
+
+        MemoryHistoryService.configure(storageDirectory: dir)
+        #expect(!MemoryHistoryService.shared.getData(for: .hour24).isEmpty)
+
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     @Test("DeviceData 采集静态系统信息")
     func deviceDataStaticInfo() {
         let data = DeviceData()

@@ -30,8 +30,14 @@ public final class MemoryHistoryService: ObservableObject, SuperLog {
     private static var pluginStorageDirectory: URL?
 
     /// Configure the storage directory. Should be called from `onBoot`.
+    ///
+    /// 注入后立即补载历史：服务单例可能早于目录注入被创建（Observer 首次
+    /// 订阅即访问 `shared`），那时 URL 为 nil、`loadHistory` 直接返回，
+    /// 磁盘上已持久化的历史会被丢弃并在下一次按分钟保存时被新会话覆盖（#383）。
+    /// 目录就绪后补载一次，与 `ThermalHistoryService.configure` 的时序保持一致。
     public static func configure(storageDirectory: URL) {
         pluginStorageDirectory = storageDirectory
+        shared.loadHistory()
     }
 
     /// Storage file URL. Configurable for testing.
