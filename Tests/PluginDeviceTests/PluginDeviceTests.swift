@@ -137,6 +137,25 @@ struct PluginDeviceTests {
         try kernel.stop()
     }
 
+    @Test("运行时禁用停止硬件采样，重新启用恢复（回归 #450）")
+    func disableStopsMetricsObserverAndEnableRestarts() async throws {
+        let kernel = KernelCoreContainer()
+        let plugin = DevicePlugin()
+        try kernel.start(plugins: [plugin])
+        try await kernel.enablePlugin(id: plugin.id)
+
+        #expect(plugin.hasActiveMetricsObserver)
+
+        // 禁用必须停掉自持的采样定时器与订阅，而不是继续在后台运行（#450）。
+        try await kernel.disablePlugin(id: plugin.id)
+        #expect(!plugin.hasActiveMetricsObserver)
+
+        try await kernel.enablePlugin(id: plugin.id)
+        #expect(plugin.hasActiveMetricsObserver)
+
+        try kernel.stop()
+    }
+
     @Test("DeviceData 采集静态系统信息")
     func deviceDataStaticInfo() {
         let data = DeviceData()

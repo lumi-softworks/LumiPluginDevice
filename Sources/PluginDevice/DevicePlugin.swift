@@ -102,8 +102,7 @@ public final class DevicePlugin: SuperPlugin, SuperLog {
     public func onBoot(kernel: KernelCoreContainer) throws {
         let viewModels = DevicePluginViewModels()
         self.viewModels = viewModels
-        metricsObserver?.cancel()
-        metricsObserver = DeviceMetricsObserver(viewModels: viewModels)
+        startMetricsObserver(viewModels: viewModels)
 
         // 0. 配置历史服务的存储目录
         if let storage = kernel.resolveProvider((any StorageProviding).self) {
@@ -156,15 +155,26 @@ public final class DevicePlugin: SuperPlugin, SuperLog {
         guard let viewModels else { return }
         try contributeMenuBar(to: kernel, viewModels: viewModels)
         registerChatContributions(kernel: kernel)
+        startMetricsObserver(viewModels: viewModels)
     }
 
-    /// 运行时禁用：撤回对话侧贡献。
+    /// 运行时禁用：撤回对话侧贡献并停止硬件采样与历史记录。
     ///
     /// - Important: 内核在运行时禁用插件时只撤回它**显式登记**的贡献
-    ///   （`trackContribution`），不会替插件清理 Provider 侧的写入。
-    ///   因此对话侧的贡献必须由宿主实现自己在 `unregister` 里撤回。
+    ///   （`trackContribution`），不会调用 `onShutdown`，也不会替插件清理
+    ///   自持的定时器与订阅。因此采样必须由插件自己在 `onDisable` 停止（#450）。
     public func onDisable(kernel: KernelCoreContainer) async throws {
         chat?.unregister(kernel: kernel)
+        metricsObserver?.cancel()
+        metricsObserver = nil
+    }
+
+    /// 测试用：观察采样 observer 是否存活。
+    var hasActiveMetricsObserver: Bool { metricsObserver != nil }
+
+    private func startMetricsObserver(viewModels: DevicePluginViewModels) {
+        metricsObserver?.cancel()
+        metricsObserver = DeviceMetricsObserver(viewModels: viewModels)
     }
 
     public func onShutdown(kernel: KernelCoreContainer) throws {
