@@ -5,7 +5,7 @@
 PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内存 / GPU / 电池 / 存储）与历史趋势， 支持主内容视图、菜单栏图表、设置页与文档页等贡献点。
 
 平台: macOS 14+, iOS 17+
-测试文件: 13 个，用例总数: 55
+测试文件: 14 个，用例总数: 78
 
 核心组件（源码目录）:
 - `Models/`
@@ -129,27 +129,35 @@ PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内�
 | 70 | 设备状态卡片 | onShutdown 撤回工具与渲染器 | — | 执行该用例 | 断言成立 | P1 | ✅ 已覆盖 | `onShutdownUnregistersToolAndRenderer` |
 | 71 | 设备状态卡片 | 禁用后重新启用会恢复工具与渲染器 | — | 执行该用例 | 断言成立 | P1 | ✅ 已覆盖 | `onEnableRestoresToolAndRenderer` |
 | 72 | 设备状态卡片 | 缺少工具与渲染器 Provider 时优雅降级 | — | 执行该用例 | 断言成立 | P2 | ✅ 已覆盖 | `onBootDegradesWithoutProviders` |
+| 73 | CPU 采样快照 | 每个 1Hz CPU 采样 tick 不得发布多个原子快照（**回归 #1210**） | 独立 CPUService 实例 | 驱动 3 个采样 tick 并收集快照发布 | 恰好 3 个快照，字段与旧属性一致 | P0 | ✅ 已覆盖 | `samplingTickPublishesExactlyOneAtomicSnapshot` |
+| 74 | CPU 采样快照 | 历史记录边界每快照只写一个点并刷新一次 UI（**回归 #1210**） | 受控快照发布器 | 发送 3 个快照 | 记录/应用/菜单栏各恰好 3 次 | P0 | ✅ 已覆盖 | `cpuRecordingWritesOneHistoryPointPerSnapshot` |
+| 75 | CPU 采样快照 | 快照字段保持原子一致 | 受控快照发布器 | 发送 1 个快照 | 应用侧收到完全相同的快照值 | P1 | ✅ 已覆盖 | `cpuRecordingKeepsSnapshotFieldsAtomic` |
+| 76 | 历史视图模型 | recent-only 更新不得重复发布长期缓冲（**回归 #1209**） | 已有长期缓冲 | 两次 applyRecent | longTermHistory 发布数为 0 | P0 | ✅ 已覆盖 | `recentOnlyUpdateDoesNotRepublishLongTermHistory` |
+| 77 | 历史视图模型 | 长期缓冲更新后发布并失效长期范围缓存（**回归 #1209**） | 已缓存 30 天结果 | applyLongTerm 追加一个点 | 发布 1 次且 30 天结果反映新点 | P1 | ✅ 已覆盖 | `longTermUpdateRepublishesAndInvalidatesLongRangeCache` |
+| 78 | 历史视图模型 | 高频缓冲更新后失效小时范围缓存（**回归 #1209**） | 已缓存 1 小时结果 | applyRecent 追加一个点 | 1 小时结果反映新点 | P1 | ✅ 已覆盖 | `recentUpdateInvalidatesHighResolutionCache` |
 
-> 说明：全部 **72 条场景**已在本包 `swift test` 中实跑通过。
+> 说明：全部 **78 条场景**已在本包 `swift test` 中实跑通过。
+>
+> 变异验证（#1210/#1209）：M1 删除 CPUService 采样完成块的原子 `usageSnapshot` 赋值 → `samplingTickPublishesExactlyOneAtomicSnapshot` 转红（快照数为 0）；M2 交换 `applyRecent`/`applyLongTerm` 的缓存失效谓词 → `recentUpdateInvalidatesHighResolutionCache`、`longTermUpdateRepublishesAndInvalidatesLongRangeCache` 转红（缓存未失效返回旧结果）；M3 在 `applyRecent` 中追加 `longTermHistory = longTermHistory` 模拟 combineLatest → `recentOnlyUpdateDoesNotRepublishLongTermHistory` 转红（发布数 2）。三处变异均单独施加并确认转红后还原，最终全量 `swift test` 全绿。
 > 用例名与描述取自 `Tests/` 下的真实 `@Test` 声明，改动测试时须同步本表。
 
 ## 覆盖率统计
 
-- P0: 已覆盖 9 / 9
-- P1: 已覆盖 45 / 45
+- P0: 已覆盖 12 / 12
+- P1: 已覆盖 48 / 48
 - P2: 已覆盖 18 / 18
-- **合计: 72 / 72**（仅表示清单场景，非源码覆盖率）
+- **合计: 78 / 78**（仅表示清单场景，非源码覆盖率）
 
 ## 优先级说明
 
-- **P0**: 描述/名称含崩溃、泄漏、截断、丢失、竞态、超时、必须、不得、重试等失效类信号的用例（9 条）
-- **P1**: 其余功能性用例（45 条）
+- **P0**: 描述/名称含崩溃、泄漏、截断、丢失、竞态、超时、必须、不得、重试等失效类信号的用例（12 条）
+- **P1**: 其余功能性用例（48 条）
 - **P2**: 稳定常量、占位、文案、空集合等边界用例（18 条）
 
 ## 跨平台说明
 
 - Package 声明: macOS 14+, iOS 17+
-- 72 条用例位于 `Tests/`，需在目标平台执行 `swift test`
+- 78 条用例位于 `Tests/`，需在目标平台执行 `swift test`
 
 ## 测试执行
 

@@ -22,28 +22,28 @@ final class DeviceMetricsObserver {
         SystemMonitorService.shared.startMonitoring()
         ThermalService.shared.startMonitoring()
 
-        Publishers.CombineLatest3(
-            CPUService.shared.$cpuUsage,
-            CPUService.shared.$perCoreUsage,
-            CPUService.shared.$loadAverage
+        // 订阅每 tick 一次的原子快照：combineLatest 六个独立属性会让每个
+        // 采样发射 6 次，历史每秒被写入 6 个点（#1210）。
+        // dropFirst() 跳过 @Published 订阅时重放的当前值。
+        Self.observeCPUUsageSnapshots(
+            CPUService.shared.$usageSnapshot.dropFirst().eraseToAnyPublisher(),
+            record: { usage in
+                CPUHistoryService.shared.recordDataPoint(usage: usage)
+            },
+            apply: { [weak self] snapshot in
+                self?.viewModels.cpu.apply(
+                    usage: snapshot.cpuUsage,
+                    perCoreUsage: snapshot.perCoreUsage,
+                    loadAverage: snapshot.loadAverage,
+                    user: snapshot.userUsage,
+                    system: snapshot.systemUsage,
+                    idle: snapshot.idleUsage
+                )
+            },
+            applyMenuBar: { [weak self] usage, perCoreUsage in
+                self?.viewModels.menuBar.applyCPU(usage: usage, perCoreUsage: perCoreUsage)
+            }
         )
-        .combineLatest(Publishers.CombineLatest3(
-            CPUService.shared.$userUsage,
-            CPUService.shared.$systemUsage,
-            CPUService.shared.$idleUsage
-        ))
-        .sink { [weak self] value, breakdown in
-            CPUHistoryService.shared.recordDataPoint(usage: value.0)
-            self?.viewModels.cpu.apply(
-                usage: value.0,
-                perCoreUsage: value.1,
-                loadAverage: value.2,
-                user: breakdown.0,
-                system: breakdown.1,
-                idle: breakdown.2
-            )
-            self?.viewModels.menuBar.applyCPU(usage: value.0, perCoreUsage: value.1)
-        }
         .store(in: &cancellables)
 
         ProcessService.shared.startMonitoring()
@@ -101,29 +101,32 @@ final class DeviceMetricsObserver {
             }
             .store(in: &cancellables)
 
+        // 四组历史缓冲各自分开订阅：`@Published` 只在缓冲真正变化时发射。
+        // 原先 combineLatest 让 recent-only 的采样 tick 也携带长期缓冲进入
+        // apply，把未变化的 30 天数据重新发布一遍（#1209）。
         CPUHistoryService.shared.$recentHistory
-            .combineLatest(CPUHistoryService.shared.$longTermHistory)
-            .sink { [weak self] recent, longTerm in
-                self?.viewModels.cpuHistory.apply(recent: recent, longTerm: longTerm)
-            }
+            .sink { [weak self] recent in self?.viewModels.cpuHistory.applyRecent(recent) }
+            .store(in: &cancellables)
+        CPUHistoryService.shared.$longTermHistory
+            .sink { [weak self] longTerm in self?.viewModels.cpuHistory.applyLongTerm(longTerm) }
             .store(in: &cancellables)
         ThermalHistoryService.shared.$recentHistory
-            .combineLatest(ThermalHistoryService.shared.$longTermHistory)
-            .sink { [weak self] recent, longTerm in
-                self?.viewModels.thermalHistory.apply(recent: recent, longTerm: longTerm)
-            }
+            .sink { [weak self] recent in self?.viewModels.thermalHistory.applyRecent(recent) }
+            .store(in: &cancellables)
+        ThermalHistoryService.shared.$longTermHistory
+            .sink { [weak self] longTerm in self?.viewModels.thermalHistory.applyLongTerm(longTerm) }
             .store(in: &cancellables)
         GPUHistoryService.shared.$recentHistory
-            .combineLatest(GPUHistoryService.shared.$longTermHistory)
-            .sink { [weak self] recent, longTerm in
-                self?.viewModels.gpuHistory.apply(recent: recent, longTerm: longTerm)
-            }
+            .sink { [weak self] recent in self?.viewModels.gpuHistory.applyRecent(recent) }
+            .store(in: &cancellables)
+        GPUHistoryService.shared.$longTermHistory
+            .sink { [weak self] longTerm in self?.viewModels.gpuHistory.applyLongTerm(longTerm) }
             .store(in: &cancellables)
         MemoryHistoryService.shared.$recentHistory
-            .combineLatest(MemoryHistoryService.shared.$longTermHistory)
-            .sink { [weak self] recent, longTerm in
-                self?.viewModels.memoryHistory.apply(recent: recent, longTerm: longTerm)
-            }
+            .sink { [weak self] recent in self?.viewModels.memoryHistory.applyRecent(recent) }
+            .store(in: &cancellables)
+        MemoryHistoryService.shared.$longTermHistory
+            .sink { [weak self] longTerm in self?.viewModels.memoryHistory.applyLongTerm(longTerm) }
             .store(in: &cancellables)
 
         dynamicDataTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -136,6 +139,21 @@ final class DeviceMetricsObserver {
         viewModels.battery.apply(BatteryService.shared)
         viewModels.storage.apply(StorageService.shared)
         viewModels.systemMonitor.apply(SystemMonitorService.shared.currentMetrics)
+    }
+
+    /// 把「每个快照记录一个历史点并刷新一次 UI」的接线独立出来，
+    /// 便于用受控发布器验证 1:1 关系，而不必构造完整的 observer（#1210）。
+    static func observeCPUUsageSnapshots(
+        _ snapshots: AnyPublisher<CPUUsageSnapshot, Never>,
+        record: @escaping (Double) -> Void,
+        apply: @escaping (CPUUsageSnapshot) -> Void,
+        applyMenuBar: @escaping (Double, [Double]) -> Void
+    ) -> AnyCancellable {
+        snapshots.sink { snapshot in
+            record(snapshot.cpuUsage)
+            apply(snapshot)
+            applyMenuBar(snapshot.cpuUsage, snapshot.perCoreUsage)
+        }
     }
 
     func cancel() {

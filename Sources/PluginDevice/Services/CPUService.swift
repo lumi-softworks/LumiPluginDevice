@@ -6,6 +6,33 @@ import LumiLoggingKit
 import Combine
 import os
 
+/// 单次 CPU 采样 tick 的原子快照：一次赋值发布全部指标，订阅方不再从
+/// 六个独立属性的 combineLatest 中拼装（#1210）。
+public struct CPUUsageSnapshot: Equatable, Sendable {
+    public var cpuUsage: Double
+    public var perCoreUsage: [Double]
+    public var loadAverage: [Double]
+    public var userUsage: Double
+    public var systemUsage: Double
+    public var idleUsage: Double
+
+    public init(
+        cpuUsage: Double,
+        perCoreUsage: [Double],
+        loadAverage: [Double],
+        userUsage: Double,
+        systemUsage: Double,
+        idleUsage: Double
+    ) {
+        self.cpuUsage = cpuUsage
+        self.perCoreUsage = perCoreUsage
+        self.loadAverage = loadAverage
+        self.userUsage = userUsage
+        self.systemUsage = systemUsage
+        self.idleUsage = idleUsage
+    }
+}
+
 /// CPU monitoring service providing real-time CPU usage data.
 @MainActor
 public final class CPUService: ObservableObject, SuperLog {
@@ -15,6 +42,16 @@ public final class CPUService: ObservableObject, SuperLog {
     public nonisolated(unsafe) static var verbose: Bool = false
 
     // MARK: - Published Properties
+
+    /// 每 tick 一次的原子快照（`#1210`）：历史记录与 UI 刷新以它为唯一边界。
+    @Published public private(set) var usageSnapshot = CPUUsageSnapshot(
+        cpuUsage: 0,
+        perCoreUsage: [],
+        loadAverage: [0, 0, 0],
+        userUsage: 0,
+        systemUsage: 0,
+        idleUsage: 100
+    )
 
     /// Current total CPU usage percentage (0.0 - 100.0)
     @Published public var cpuUsage: Double = 0.0
@@ -38,6 +75,8 @@ public final class CPUService: ObservableObject, SuperLog {
 
     private var monitoringTimer: Timer?
     private var samplingTask: Task<Void, Never>?
+    /// 是否有采样在途中（测试用它等待 tick 完成）。
+    var isSampling: Bool { samplingTask != nil }
     private var subscribersCount = 0
 
     /// 心跳节流计数：每次 CPU 采样 tick 自增，每 N 次打一条日志（1Hz 定时器 → 约每 10 秒一条）。
@@ -82,7 +121,8 @@ public final class CPUService: ObservableObject, SuperLog {
 
     // MARK: - Private Methods
 
-    private func updateCPUUsage() {
+    /// 触发一次采样（测试直接驱动 tick 用；正式路径由监控定时器调用）。
+    func updateCPUUsage() {
         guard samplingTask == nil else { return }
         let previousTicks = previousTicks
 
@@ -102,6 +142,16 @@ public final class CPUService: ObservableObject, SuperLog {
                 self.userUsage = snapshot.userUsage
                 self.systemUsage = snapshot.systemUsage
                 self.idleUsage = snapshot.idleUsage
+                // 一次赋值发布整份快照：每个采样 tick 只产生一次历史记录
+                // 与一次 UI 刷新，六个旧属性仅供直接读取方使用（#1210）。
+                self.usageSnapshot = CPUUsageSnapshot(
+                    cpuUsage: snapshot.totalUsage,
+                    perCoreUsage: snapshot.perCoreUsage,
+                    loadAverage: load,
+                    userUsage: snapshot.userUsage,
+                    systemUsage: snapshot.systemUsage,
+                    idleUsage: snapshot.idleUsage
+                )
 
                 // 节流心跳：确认 1Hz CPU 采样链路在持续运行。
                 self.tickCount += 1
