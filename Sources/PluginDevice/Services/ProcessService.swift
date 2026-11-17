@@ -94,13 +94,24 @@ public final class ProcessService: ObservableObject, SuperLog {
 
     // MARK: - Internal Methods
 
-    func sampleProcessesInternal() -> [ProcessMetric] {
+    /// 按需采样一次的异步入口（供 `device_status(scope: .processes)` 使用）。
+    ///
+    /// 与周期采样一致：libproc 全量枚举放到后台线程执行，只在主 actor
+    /// 上读取与回写快照基线。同步版会把整个枚举压在主线程上，在启动
+    /// 窗口内触发时阻塞 UI 数百毫秒（#1293）。
+    func sampleProcessesOnce() async -> [ProcessMetric] {
+        let baseline = previousSnapshot
+        let baselineTimestamp = previousTimestamp
         let appBundlePaths = Self.runningApplicationBundlePaths()
-        let result = Self.sampleProcesses(
-            previousSnapshot: previousSnapshot,
-            previousTimestamp: previousTimestamp,
-            appBundlePaths: appBundlePaths
-        )
+
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.sampleProcesses(
+                previousSnapshot: baseline,
+                previousTimestamp: baselineTimestamp,
+                appBundlePaths: appBundlePaths
+            )
+        }.value
+
         previousSnapshot = result.snapshot
         previousTimestamp = result.timestamp
         return result.metrics

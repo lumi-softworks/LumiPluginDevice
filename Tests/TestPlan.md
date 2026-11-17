@@ -5,7 +5,7 @@
 PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内存 / GPU / 电池 / 存储）与历史趋势， 支持主内容视图、菜单栏图表、设置页与文档页等贡献点。
 
 平台: macOS 14+, iOS 17+
-测试文件: 17 个，用例总数: 87
+测试文件: 18 个，用例总数: 90
 
 核心组件（源码目录）:
 - `Models/`
@@ -51,6 +51,7 @@ PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内�
 - **历史图表几何**（4 条）：由 `xMapsTimestampsProportionally`、`longGapKeepsProportionalWidth`、`xClampsOutOfRangeTimestamps`、`hoverSelectsNearestTimestamp` 锁定，防止绘线或悬浮选点退回数组等距映射。
 - **CPU 采样**（4 条）：由 `averageUsageAcrossCPUs`、`usageIsDeltaBased`、`shortBuffersReturnZero`、`zeroCPUCountReturnsZero` 锁定，防止 `host_processor_info` 返回的 CPU 数量/buffer 长度与循环不一致时越界。
 - **本地化**（5 条）：由 `memoryMonitorHasTranslationsInCompiledBundle`、`sensorLabelUsesInjectedLocalization`、`sensorLabelHasTranslationsInCompiledBundle`、`registrationTitlesUseInjectedLocalization`、`entryLabelsHaveTranslationsInCompiledBundle` 锁定，防止视图词条与注册入口标题绕过 `pluginLocalization`，或在某个规范语言下缺失而回退成英文 key。
+- **设备状态采集**（3 条）：由 `processesScopeMergesRankingsAndDedups`、`processesScopeCapsAtLimit`、`onDemandSamplingSeedsBaselineThenReturnsMetrics` 等用例锁定；改动 `DeviceStatusCollector` 进程榜单合并或 `ProcessService` 按需采样时优先跑对应测试文件。
 
 ## 测试用例清单
 
@@ -144,8 +145,13 @@ PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内�
 | 85 | CPU 历史恢复 | 损坏缓存被隔离且历史保持为空 | 写入非法 JSON 的缓存文件 | 构造 CPUHistoryService 并等待隔离 | 隔离文件出现、源文件移除、缓冲为空 | P0 | ✅ 已覆盖 | `corruptCacheIsQuarantined` |
 | 86 | CPU 历史恢复 | 恢复的磁盘数据必须与启动窗口的采样点合并，不得覆盖 | 独立服务实例 | 先写入启动窗口的点再 applyLoadedHistory | 时间顺序为磁盘数据在前、启动点在后 | P1 | ✅ 已覆盖 | `restoredCacheMergesWithBootWindowPoints` |
 | 87 | CPU 历史恢复 | 恢复完成前保存必须被封锁，不得用空缓冲覆盖缓存 | 带两点的缓存文件 | 恢复落位前结算并保存 | saveHistory 返回 nil，磁盘文件未被覆盖，恢复后三点齐全 | P0 | ✅ 已覆盖 | `savesAreSkippedWhileRestoring` |
+| 88 | 设备状态采集 | processes 范围合并 CPU 榜与内存榜并去重，按 CPU 优先排序 | 预置 topProcesses 四条指标 | 调用 `collect(scope: .processes)` | 去重无重复、CPU 优先排序、字段一致（**#1293**） | P1 | ✅ 已覆盖 | `processesScopeMergesRankingsAndDedups` |
+| 89 | 设备状态采集 | 榜单超过上限时只保留前 processLimit 条 | 预置 20 条指标 | 调用 `collect(scope: .processes)` | 恰好 8 条且顺序正确 | P1 | ✅ 已覆盖 | `processesScopeCapsAtLimit` |
+| 90 | 设备状态采集 | 按需采样第一轮播种基线，第二轮返回真实进程 | 独立 ProcessService 实例 | 连续两次 `sampleProcessesOnce()` | 首轮为空、次轮非空且进程名非空（**#1293**） | P0 | ✅ 已覆盖 | `onDemandSamplingSeedsBaselineThenReturnsMetrics` |
 
-> 说明：全部 **87 条场景**已在本包 `swift test` 中实跑通过。
+> 说明：全部 **90 条场景**已在本包 `swift test` 中实跑通过。
+>
+> 变异验证（#1293）：M8 删除 `sampleProcessesOnce()` 的基线回写 → `onDemandSamplingSeedsBaselineThenReturnsMetrics` 转红（次轮拿不到可比对数据，返回空）。变异确认转红后还原，最终 90 条全绿。
 >
 > 变异验证（#1210/#1209）：M1 删除 CPUService 采样完成块的原子 `usageSnapshot` 赋值 → `samplingTickPublishesExactlyOneAtomicSnapshot` 转红（快照数为 0）；M2 交换 `applyRecent`/`applyLongTerm` 的缓存失效谓词 → `recentUpdateInvalidatesHighResolutionCache`、`longTermUpdateRepublishesAndInvalidatesLongRangeCache` 转红（缓存未失效返回旧结果）；M3 在 `applyRecent` 中追加 `longTermHistory = longTermHistory` 模拟 combineLatest → `recentOnlyUpdateDoesNotRepublishLongTermHistory` 转红（发布数 2）。
 > 变异验证（#649/#793）：M4 删除 `usedMemoryBytes` 的 compressed 项 → `usedMemoryIncludesCompressorPages` 转红；M5 删除 `scanVolumes` 的 `externalVolumes` 赋值 → `eachScanDeliversCurrentRound` 转红（交付数 0）。
@@ -155,21 +161,21 @@ PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内�
 
 ## 覆盖率统计
 
-- P0: 已覆盖 17 / 17
-- P1: 已覆盖 51 / 51
+- P0: 已覆盖 18 / 18
+- P1: 已覆盖 53 / 53
 - P2: 已覆盖 19 / 19
-- **合计: 87 / 87**（仅表示清单场景，非源码覆盖率）
+- **合计: 90 / 90**（仅表示清单场景，非源码覆盖率）
 
 ## 优先级说明
 
-- **P0**: 描述/名称含崩溃、泄漏、截断、丢失、竞态、超时、必须、不得、重试等失效类信号的用例（17 条）
-- **P1**: 其余功能性用例（51 条）
+- **P0**: 描述/名称含崩溃、泄漏、截断、丢失、竞态、超时、必须、不得、重试等失效类信号的用例（18 条）
+- **P1**: 其余功能性用例（53 条）
 - **P2**: 稳定常量、占位、文案、空集合等边界用例（19 条）
 
 ## 跨平台说明
 
 - Package 声明: macOS 14+, iOS 17+
-- 78 条用例位于 `Tests/`，需在目标平台执行 `swift test`
+- 90 条用例位于 `Tests/`，需在目标平台执行 `swift test`
 
 ## 测试执行
 

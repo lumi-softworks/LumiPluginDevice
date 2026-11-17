@@ -41,7 +41,10 @@ public final class DeviceStatusCollector {
     ///
     /// - Parameter scope: 查询范围。
     /// - Returns: 结构化载荷。
-    public func collect(scope: DeviceStatusScope) -> DeviceStatusPayload {
+    ///
+    /// 进程范围的采样与排序会把 libproc 枚举和 O(N log N) 排序放到
+    /// 后台线程执行，只在主 actor 上读写服务状态（#1293）。
+    public func collect(scope: DeviceStatusScope) async -> DeviceStatusPayload {
         DeviceStatusPayload(
             scope: scope,
             timestamp: Date().timeIntervalSince1970,
@@ -52,7 +55,7 @@ public final class DeviceStatusCollector {
             battery: scope == .overview ? batteryStatus() : nil,
             volumes: scope == .storage || scope == .overview ? volumeStatuses() : [],
             thermal: scope == .thermal ? thermalStatus() : nil,
-            processes: scope.needsProcesses ? processStatuses() : []
+            processes: scope.needsProcesses ? await processStatuses() : []
         )
     }
 
@@ -173,36 +176,40 @@ public final class DeviceStatusCollector {
     ///
     /// `ProcessService` 每秒采样一次，刚启动时可能还没有数据。
     /// 这里在列表为空时主动触发一次采样，让「问一次进程」不必等下一秒。
-    /// `sampleProcessesInternal()` 直接返回本轮结果，不写 `topProcesses`，
+    /// `sampleProcessesOnce()` 直接返回本轮结果，不写 `topProcesses`，
     /// 因此必须用返回值而不是再读一次 published 属性。
-    private func processStatuses() -> [DeviceProcessStatus] {
+    /// 枚举与两轮排序都在后台线程完成，只把服务状态读写留在主 actor（#1293）。
+    private func processStatuses() async -> [DeviceProcessStatus] {
         let service = ProcessService.shared
         let metrics = service.topProcesses.isEmpty
-            ? service.sampleProcessesInternal()
+            ? await service.sampleProcessesOnce()
             : service.topProcesses
 
-        let byCPU = metrics.sorted { $0.cpuUsage > $1.cpuUsage }
-        let byMemory = metrics.sorted { $0.memoryUsage > $1.memoryUsage }
-        // 两个榜单合并去重：CPU 榜与内存榜通常高度重合，
-        // 直接拼接会让同一进程出现两次。
-        var seen = Set<Int32>()
-        var merged: [DeviceProcessStatus] = []
-        for metric in byCPU + byMemory {
-            guard !seen.contains(metric.id) else { continue }
-            seen.insert(metric.id)
-            merged.append(
-                DeviceProcessStatus(
-                    pid: metric.id,
-                    name: metric.name,
-                    cpuPercentage: metric.cpuUsage,
-                    memoryBytes: metric.memoryUsage,
-                    instanceCount: metric.instanceCount,
-                    isCurrentApp: metric.isCurrentApp
+        let limit = Self.processLimit
+        return await Task.detached(priority: .userInitiated) {
+            let byCPU = metrics.sorted { $0.cpuUsage > $1.cpuUsage }
+            let byMemory = metrics.sorted { $0.memoryUsage > $1.memoryUsage }
+            // 两个榜单合并去重：CPU 榜与内存榜通常高度重合，
+            // 直接拼接会让同一进程出现两次。
+            var seen = Set<Int32>()
+            var merged: [DeviceProcessStatus] = []
+            for metric in byCPU + byMemory {
+                guard !seen.contains(metric.id) else { continue }
+                seen.insert(metric.id)
+                merged.append(
+                    DeviceProcessStatus(
+                        pid: metric.id,
+                        name: metric.name,
+                        cpuPercentage: metric.cpuUsage,
+                        memoryBytes: metric.memoryUsage,
+                        instanceCount: metric.instanceCount,
+                        isCurrentApp: metric.isCurrentApp
+                    )
                 )
-            )
-            if merged.count >= Self.processLimit { break }
-        }
-        return merged
+                if merged.count >= limit { break }
+            }
+            return merged
+        }.value
     }
 }
 
