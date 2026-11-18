@@ -58,14 +58,27 @@ final class DeviceMetricsObserver {
             }
             .store(in: &cancellables)
 
-        MemoryService.shared.$memoryUsagePercentage
-            .combineLatest(MemoryService.shared.$usedMemory, MemoryService.shared.$totalMemory)
-            .sink { [weak self] percentage, used, total in
+        // 同 CPU（#1210）：订阅每 tick 一次的原子快照。combineLatest 三个
+        // 独立属性会让每个采样发射 2 次（先「新 used + 旧百分比」，再完整
+        // 快照），历史每秒被写入 2 个点且首条混入上一轮的百分比（#382）。
+        // dropFirst() 跳过 @Published 订阅时重放的当前值。
+        Self.observeMemoryUsageSnapshots(
+            MemoryService.shared.$usageSnapshot.dropFirst().eraseToAnyPublisher(),
+            record: { percentage, used in
                 MemoryHistoryService.shared.recordDataPoint(pct: percentage, bytes: used)
-                self?.viewModels.memory.apply(percentage: percentage, used: used, total: total)
+            },
+            apply: { [weak self] snapshot in
+                self?.viewModels.memory.apply(
+                    percentage: snapshot.percentage,
+                    used: snapshot.used,
+                    total: snapshot.total
+                )
+            },
+            applyMenuBar: { [weak self] percentage, used, total in
                 self?.viewModels.menuBar.applyMemory(percentage: percentage, used: used, total: total)
             }
-            .store(in: &cancellables)
+        )
+        .store(in: &cancellables)
 
         GPUService.shared.$utilization
             .sink { utilization in GPUHistoryService.shared.recordDataPoint(usage: utilization) }
@@ -155,6 +168,20 @@ final class DeviceMetricsObserver {
             record(snapshot.cpuUsage)
             apply(snapshot)
             applyMenuBar(snapshot.cpuUsage, snapshot.perCoreUsage)
+        }
+    }
+
+    /// Memory 与 CPU 同构：每个快照记录一个历史点并刷新一次 UI（#382）。
+    static func observeMemoryUsageSnapshots(
+        _ snapshots: AnyPublisher<MemoryUsageSnapshot, Never>,
+        record: @escaping (Double, UInt64) -> Void,
+        apply: @escaping (MemoryUsageSnapshot) -> Void,
+        applyMenuBar: @escaping (Double, UInt64, UInt64) -> Void
+    ) -> AnyCancellable {
+        snapshots.sink { snapshot in
+            record(snapshot.percentage, snapshot.used)
+            apply(snapshot)
+            applyMenuBar(snapshot.percentage, snapshot.used, snapshot.total)
         }
     }
 

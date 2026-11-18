@@ -6,6 +6,20 @@ import Foundation
 import LumiLoggingKit
 import os
 
+/// 单次内存采样 tick 的原子快照：一次赋值发布全部指标，订阅方不再从
+/// 三个独立属性的 combineLatest 中拼装（#382，与 CPU 的 #1210 同构）。
+public struct MemoryUsageSnapshot: Equatable, Sendable {
+    public var percentage: Double
+    public var used: UInt64
+    public var total: UInt64
+
+    public init(percentage: Double, used: UInt64, total: UInt64) {
+        self.percentage = percentage
+        self.used = used
+        self.total = total
+    }
+}
+
 /// Memory monitoring service providing real-time memory usage data.
 @MainActor
 public final class MemoryService: ObservableObject, SuperLog {
@@ -15,6 +29,13 @@ public final class MemoryService: ObservableObject, SuperLog {
     nonisolated public static let emoji = "🧠"
 
     // MARK: - Published Properties
+
+    /// 每 tick 一次的原子快照（`#382`）：历史记录与 UI 刷新以它为唯一边界。
+    @Published public private(set) var usageSnapshot = MemoryUsageSnapshot(
+        percentage: 0,
+        used: 0,
+        total: ProcessInfo.processInfo.physicalMemory
+    )
 
     /// Memory usage percentage (0.0 - 100.0)
     @Published public var memoryUsagePercentage: Double = 0.0
@@ -32,6 +53,8 @@ public final class MemoryService: ObservableObject, SuperLog {
 
     private var monitoringTimer: Timer?
     private var samplingTask: Task<Void, Never>?
+    /// 是否有采样在途中（测试用它等待 tick 完成）。
+    var isSampling: Bool { samplingTask != nil }
     private var subscribersCount = 0
 
     /// 心跳节流计数：每次内存采样 tick 自增，每 N 次打一条日志（1Hz 定时器 → 约每 10 秒一条）。
@@ -114,7 +137,7 @@ public final class MemoryService: ObservableObject, SuperLog {
         return result == KERN_SUCCESS ? UInt64(pageSize) : 4096
     }
 
-    private func updateMemoryUsage() {
+    func updateMemoryUsage() {
         guard samplingTask == nil else { return }
         let totalMemory = totalMemory
 
@@ -126,6 +149,13 @@ public final class MemoryService: ObservableObject, SuperLog {
                 guard self.subscribersCount > 0 else { return }
                 self.usedMemory = used
                 self.memoryUsagePercentage = min(100.0, Double(used) / Double(total) * 100.0)
+                // 原子快照必须在全部独立属性赋值「之后」发布，作为本 tick 的
+                // 唯一历史/UI 边界（#382）。
+                self.usageSnapshot = MemoryUsageSnapshot(
+                    percentage: self.memoryUsagePercentage,
+                    used: used,
+                    total: total
+                )
 
                 // 节流心跳：确认 1Hz 内存采样链路在持续运行。
                 self.tickCount += 1
