@@ -156,6 +156,9 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
                     memTotal: memTotal,
                     netCounters: netCounters
                 )
+                // 磁盘计数器按 diskCounterInterval 节流（#229）：借同一
+                // samplingTask 槽位补充读取，否则 Disk I/O 永远是 0。
+                self.scheduleDiskCountersUpdateIfNeeded()
             }
         }
     }
@@ -212,12 +215,14 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
         }
     }
 
-    private func updateMetrics(diskCounters: (readBytes: UInt64, writeBytes: UInt64)?) {
+    /// 主线程路径：CPU/内存/网络走 MainActor 采样，磁盘按传入计数器差分
+    /// （internal 供测试注入时钟验证速率计算）。磁盘差分只在
+    /// updateMetrics(cpu:...) 里消费一次；这里提前算一遍会把
+    /// lastDiskCheckTime 推进到当前时刻，真正的计算因时间差为 0 而归零。
+    func updateMetrics(diskCounters: (readBytes: UInt64, writeBytes: UInt64)?) {
         let cpu = getCPUUsage()
         let (memUsed, memTotal) = getMemoryUsage()
         let (netIn, netOut) = getNetworkUsage()
-        let (diskRead, diskWrite) = getDiskUsage(counters: diskCounters)
-
         updateMetrics(cpu: cpu, memUsed: memUsed, memTotal: memTotal, netIn: netIn, netOut: netOut, diskCounters: diskCounters)
     }
 
