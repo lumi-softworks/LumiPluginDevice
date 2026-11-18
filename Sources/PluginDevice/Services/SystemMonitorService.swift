@@ -48,6 +48,7 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
     private var prevDiskWrite: UInt64 = 0
     private var lastCheckTime: TimeInterval = 0
     private var lastDiskCheckTime: TimeInterval = 0
+    private var prevBackgroundCPUTicks: (used: Int64, total: Int64)?
 
     // History buffers (keep last 60 points)
     private var cpuHistory: [Double] = Array(repeating: 0, count: 60)
@@ -139,18 +140,58 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
         guard samplingTask == nil else { return }
 
         samplingTask = Task.detached(priority: .utility) { [weak self] in
-            // 采集数据在后台线程
-            let cpu = Self.sampleCPUUsage()
+            // 采集数据在后台线程：CPU 与网络只取原始计数，差分统一在
+            // MainActor 侧完成（#228），避免把开机累计值当瞬时值。
+            let cpuTicks = Self.sampleCPUTicks()
             let (memUsed, memTotal) = Self.sampleMemoryUsage()
-            let (netIn, netOut) = Self.sampleNetworkUsage()
+            let netCounters = Self.sampleNetworkCounters()
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.samplingTask = nil
                 guard self.refCount > 0 else { return }
-                self.updateMetrics(cpu: cpu, memUsed: memUsed, memTotal: memTotal, netIn: netIn, netOut: netOut, diskCounters: nil)
+                self.applyBackgroundSamples(
+                    cpuTicks: cpuTicks,
+                    memUsed: memUsed,
+                    memTotal: memTotal,
+                    netCounters: netCounters
+                )
             }
         }
+    }
+
+    /// 后台采样结果在 MainActor 上做差分：CPU 取相邻两次 tick 之差，
+    /// 网络取相邻两次计数器之差除以采样间隔（#228）。
+    func applyBackgroundSamples(
+        cpuTicks: (used: Int64, total: Int64),
+        memUsed: UInt64,
+        memTotal: UInt64,
+        netCounters: (received: UInt64, sent: UInt64)
+    ) {
+        let cpu = Self.cpuUsage(fromTicks: cpuTicks, previous: prevBackgroundCPUTicks)
+        prevBackgroundCPUTicks = cpuTicks
+
+        let now = timeProvider()
+        let elapsed = lastCheckTime > 0 ? now - lastCheckTime : 0
+        let speeds = Self.networkSpeed(
+            currentIn: netCounters.received,
+            currentOut: netCounters.sent,
+            previousIn: prevNetworkIn,
+            previousOut: prevNetworkOut,
+            elapsed: elapsed
+        )
+        prevNetworkIn = netCounters.received
+        prevNetworkOut = netCounters.sent
+        lastCheckTime = now
+
+        updateMetrics(
+            cpu: cpu,
+            memUsed: memUsed,
+            memTotal: memTotal,
+            netIn: speeds.download,
+            netOut: speeds.upload,
+            diskCounters: nil
+        )
     }
 
     private func scheduleDiskCountersUpdateIfNeeded() {
@@ -345,32 +386,55 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
             ptr = interface.ifa_next
         }
 
-        let now = Date().timeIntervalSince1970
-        let timeDiff = now - lastCheckTime
-
-        var speedIn: Double = 0
-        var speedOut: Double = 0
-
-        if lastCheckTime > 0 && timeDiff > 0 {
-            if totalIn >= prevNetworkIn {
-                speedIn = Double(totalIn - prevNetworkIn) / timeDiff
-            }
-            if totalOut >= prevNetworkOut {
-                speedOut = Double(totalOut - prevNetworkOut) / timeDiff
-            }
-        }
+        let now = timeProvider()
+        let elapsed = lastCheckTime > 0 ? now - lastCheckTime : 0
+        let speeds = Self.networkSpeed(
+            currentIn: totalIn,
+            currentOut: totalOut,
+            previousIn: prevNetworkIn,
+            previousOut: prevNetworkOut,
+            elapsed: elapsed
+        )
 
         prevNetworkIn = totalIn
         prevNetworkOut = totalOut
         lastCheckTime = now
 
-        return (speedIn, speedOut)
+        return (speeds.download, speeds.upload)
     }
 
     package nonisolated static func shouldReadNetworkCounters(flags: UInt32, addressFamily: UInt8?) -> Bool {
         guard addressFamily == UInt8(AF_LINK) else { return false }
         guard (flags & UInt32(IFF_LOOPBACK)) == 0 else { return false }
         return (flags & UInt32(IFF_UP)) != 0
+    }
+
+    /// 相邻两次 CPU tick 求差得到瞬时使用率；`previous` 为 nil（首个采样）
+    /// 或计数器回绕/重置（总差值非正）时返回 0，绝不回退到开机累计均值（#228）。
+    nonisolated static func cpuUsage(
+        fromTicks current: (used: Int64, total: Int64),
+        previous: (used: Int64, total: Int64)?
+    ) -> Double {
+        guard let previous else { return 0 }
+        let deltaTotal = current.total - previous.total
+        let deltaUsed = current.used - previous.used
+        guard deltaTotal > 0 else { return 0 }
+        return min(max(Double(deltaUsed) / Double(deltaTotal), 0), 1)
+    }
+
+    /// 相邻两次网络计数器求差并除以时间差得到字节速率；时间差不大于零
+    /// 或某方向计数器回退（网卡重置）时该方向返回 0。
+    nonisolated static func networkSpeed(
+        currentIn: UInt64,
+        currentOut: UInt64,
+        previousIn: UInt64,
+        previousOut: UInt64,
+        elapsed: TimeInterval
+    ) -> (download: Double, upload: Double) {
+        guard elapsed > 0 else { return (0, 0) }
+        let download = currentIn >= previousIn ? Double(currentIn - previousIn) / elapsed : 0
+        let upload = currentOut >= previousOut ? Double(currentOut - previousOut) / elapsed : 0
+        return (download, upload)
     }
 
     // MARK: - Disk Usage
@@ -461,17 +525,16 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
 
     // MARK: - Static Sampling Methods (for background thread)
 
-    /// 后台采样 CPU 使用率（无状态，每次独立采样）
+    /// 后台采样 CPU：只返回自开机累计的 used/total tick 求和，差分交给
+    /// MainActor（#228）。
 
-    private nonisolated static func sampleCPUUsage() -> Double {
+    private nonisolated static func sampleCPUTicks() -> (used: Int64, total: Int64) {
         var numCPUsU: natural_t = 0
         var cpuInfoU: processor_info_array_t?
         var numCpuInfoU: mach_msg_type_number_t = 0
         let result = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &numCPUsU, &cpuInfoU, &numCpuInfoU)
 
-        guard result == KERN_SUCCESS, let cpuInfoU else { return 0 }
-
-        // 简单采样：计算总体使用率（不依赖历史状态）
+        guard result == KERN_SUCCESS, let cpuInfoU else { return (0, 0) }
 
         // CPU_STATE counters are Int32 per logical core. Summing them into an
         // Int32 overflows quickly on machines with multiple cores because the
@@ -496,8 +559,7 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
         let ptr = UnsafeMutableRawPointer(cpuInfoU)
         vm_deallocate(mach_task_self_, vm_address_t(Int(bitPattern: ptr)), vm_size_t(size))
 
-        let total = totalIdle + totalUsed
-        return total > 0 ? Double(totalUsed) / Double(total) : 0
+        return (totalUsed, totalIdle + totalUsed)
     }
 
     /// 后台采样内存使用情况
@@ -522,9 +584,9 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
         return (0, total)
     }
 
-    /// 后台采样网络使用情况
+    /// 后台采样网络：只返回自开机累计的收发字节数，差分交给 MainActor（#228）。
 
-    private nonisolated static func sampleNetworkUsage() -> (inBytes: Double, outBytes: Double) {
+    private nonisolated static func sampleNetworkCounters() -> (received: UInt64, sent: UInt64) {
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddr) == 0 else { return (0, 0) }
         defer { freeifaddrs(ifaddr) }
@@ -546,7 +608,7 @@ public final class SystemMonitorService: ObservableObject, SuperLog {
             ptr = interface.ifa_next
         }
 
-        return (Double(totalIn), Double(totalOut))
+        return (totalIn, totalOut)
     }
 }
 
