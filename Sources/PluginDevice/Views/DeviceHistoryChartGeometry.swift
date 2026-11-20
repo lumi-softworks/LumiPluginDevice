@@ -30,14 +30,58 @@ enum DeviceHistoryChartGeometry {
         timestamps: [TimeInterval],
         width: CGFloat
     ) -> Int? {
-        guard let start = timestamps.first, let end = timestamps.last else { return nil }
+        nearestIndex(
+            to: x,
+            count: timestamps.count,
+            timestampAt: { timestamps[$0] },
+            width: width
+        )
+    }
+
+    /// 在已按时间戳升序排列的采样序列中找到横坐标 `x` 的最近样本下标。
+    ///
+    /// 与时间戳数组版语义一致；直接对样本二分，悬浮交互无需每次事件
+    /// 重新物化整条时间戳数组（#1206）。
+    static func nearestSampleIndex<T: DeviceHistorySample>(
+        to x: CGFloat,
+        samples: [T],
+        width: CGFloat
+    ) -> Int? {
+        nearestIndex(
+            to: x,
+            count: samples.count,
+            timestampAt: { samples[$0].timestamp },
+            width: width
+        )
+    }
+
+    /// 二分收敛到夹住目标的两点后按距离取近者；距离相同取更小下标，
+    /// 与原线性扫描 `indices.min` 的平局语义保持一致。
+    private static func nearestIndex(
+        to x: CGFloat,
+        count: Int,
+        timestampAt: (Int) -> TimeInterval,
+        width: CGFloat
+    ) -> Int? {
+        guard count > 0 else { return nil }
+        let start = timestampAt(0)
+        let end = timestampAt(count - 1)
         guard width > 0, end > start else { return 0 }
 
         let clampedX = min(max(x, 0), width)
         let target = start + Double(clampedX / width) * (end - start)
-        return timestamps.indices.min {
-            abs(timestamps[$0] - target) < abs(timestamps[$1] - target)
+
+        var low = 0
+        var high = count - 1
+        while high - low > 1 {
+            let mid = (low + high) / 2
+            if timestampAt(mid) < target {
+                low = mid
+            } else {
+                high = mid
+            }
         }
+        return abs(timestampAt(low) - target) <= abs(timestampAt(high) - target) ? low : high
     }
 }
 

@@ -10,9 +10,6 @@ struct CPUHistoryGraphView: View {
     let dataPoints: [CPUDataPoint]
     let timeRange: CPUTimeRange
 
-    @State private var hoverLocation: CGPoint?
-    @State private var hoverDataPoint: CPUDataPoint?
-
     private let yAxisWidth: CGFloat = 40
     private let xAxisHeight: CGFloat = 30
 
@@ -53,29 +50,12 @@ struct CPUHistoryGraphView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
 
-                        // Hover Interaction
-                        if let hoverLocation = hoverLocation, let point = hoverDataPoint {
-                            // Vertical Line
-                            Path { path in
-                                path.move(to: CGPoint(x: hoverLocation.x, y: 0))
-                                path.addLine(to: CGPoint(x: hoverLocation.x, y: geometry.size.height))
-                            }
-                            .stroke(Color.primary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-
-                            // Tooltip
-                            CPUTooltipView(point: point, timeRange: timeRange)
-                                .position(x: clampedX(hoverLocation.x, width: geometry.size.width), y: 40)
-                        }
-                    }
-                    .contentShape(Rectangle()) // Ensure entire area is hittable
-                    .onContinuousHover { phase in
-                        switch phase {
-                        case .active(let location):
-                            updateHoverDataPoint(at: location.x, width: geometry.size.width)
-                        case .ended:
-                            hoverLocation = nil
-                            hoverDataPoint = nil
-                        }
+                        // 悬浮层独立成子视图并持有 hover 状态：移动指示线/
+                        // 气泡只重算本层，不再触发全量历史 Path 重建（#1206）。
+                        CPUHistoryHoverOverlay(
+                            dataPoints: dataPoints,
+                            timeRange: timeRange
+                        )
                     }
                 }
             }
@@ -178,12 +158,53 @@ struct CPUHistoryGraphView: View {
 
         return formatter.string(from: date)
     }
-    
+}
+
+// MARK: - Hover Overlay
+
+/// 悬浮选点层：自带 hover 状态并铺满整个图表区域接收事件。
+/// 选点直接在采样序列上二分（O(log N)），不再每次事件重建时间戳数组。
+private struct CPUHistoryHoverOverlay: View {
+    let dataPoints: [CPUDataPoint]
+    let timeRange: CPUTimeRange
+
+    @State private var hoverLocation: CGPoint?
+    @State private var hoverDataPoint: CPUDataPoint?
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                if let hoverLocation = hoverLocation, let point = hoverDataPoint {
+                    // Vertical Line
+                    Path { path in
+                        path.move(to: CGPoint(x: hoverLocation.x, y: 0))
+                        path.addLine(to: CGPoint(x: hoverLocation.x, y: geometry.size.height))
+                    }
+                    .stroke(Color.primary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+
+                    // Tooltip
+                    CPUTooltipView(point: point, timeRange: timeRange)
+                        .position(x: clampedX(hoverLocation.x, width: geometry.size.width), y: 40)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle()) // Ensure entire area is hittable
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    updateHoverDataPoint(at: location.x, width: geometry.size.width)
+                case .ended:
+                    hoverLocation = nil
+                    hoverDataPoint = nil
+                }
+            }
+        }
+    }
+
     private func updateHoverDataPoint(at x: CGFloat, width: CGFloat) {
-        let timestamps = dataPoints.map(\.timestamp)
-        guard let index = DeviceHistoryChartGeometry.nearestIndex(
+        guard let index = DeviceHistoryChartGeometry.nearestSampleIndex(
             to: x,
-            timestamps: timestamps,
+            samples: dataPoints,
             width: width
         ) else {
             hoverLocation = nil
@@ -196,14 +217,14 @@ struct CPUHistoryGraphView: View {
         hoverLocation = CGPoint(
             x: DeviceHistoryChartGeometry.x(
                 for: point.timestamp,
-                start: timestamps.first ?? point.timestamp,
-                end: timestamps.last ?? point.timestamp,
+                start: dataPoints[dataPoints.startIndex].timestamp,
+                end: dataPoints[dataPoints.index(before: dataPoints.endIndex)].timestamp,
                 width: width
             ),
             y: 0
         )
     }
-    
+
     private func clampedX(_ x: CGFloat, width: CGFloat) -> CGFloat {
         // Keep tooltip within bounds
         let tooltipWidth: CGFloat = 140
