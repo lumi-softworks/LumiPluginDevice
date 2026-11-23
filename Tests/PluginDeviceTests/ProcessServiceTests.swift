@@ -2,6 +2,21 @@ import Darwin
 import Testing
 @testable import PluginDevice
 
+/// `sysctl(KERN_PROC_ALL)` 枚举回归测试。
+///
+/// App Sandbox 拒绝 `proc_listpids`，枚举改走 sysctl；至少要能列出自
+/// 己这个进程，否则榜单在沙盒宿主里永远是空的。
+@Suite("ProcessService PID 枚举")
+struct ProcessServiceEnumerationTests {
+    @Test("枚举结果非空且包含当前进程")
+    func enumeratesOwnProcess() {
+        let pids = ProcessService.allProcessIDs()
+
+        #expect(!pids.isEmpty)
+        #expect(pids.contains(getpid()))
+    }
+}
+
 /// `proc_taskinfo.pti_total_user/system` 的单位换算回归测试。
 ///
 /// mach absolute time 的每秒 tick 数随硬件不同（Apple Silicon 24 MHz、

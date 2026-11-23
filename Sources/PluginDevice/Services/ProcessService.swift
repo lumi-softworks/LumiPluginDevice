@@ -7,7 +7,12 @@ import Darwin
 import Foundation
 import os
 import LumiLoggingKit
-/// Process monitoring service that reports CPU/memory usage per process via libproc.
+/// Process monitoring service that reports CPU/memory usage per process.
+///
+/// PID 枚举走 `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_ALL)`，单个进程的
+/// CPU/内存仍由 libproc（`proc_pidinfo`/`proc_pidpath`）读取。App Sandbox
+/// 会拒绝 `proc_listpids`（EPERM）但放行 `sysctl` 枚举，因此沙盒宿主
+/// （如 Mac App Store 分发的 Wakey）也能拿到完整进程列表。
 ///
 /// 同名多进程（如浏览器/IDE 的多个 Helper）会合并为一条记录并标注份数，
 /// 与网络区块的展示口径保持一致。同一次采样分别产出 CPU 榜与内存榜：
@@ -154,6 +159,34 @@ public final class ProcessService: ObservableObject, SuperLog {
         )
     }
 
+    /// 枚举当前所有进程 PID。
+    ///
+    /// App Sandbox 下 `proc_listpids` 返回 EPERM，而同一份内核进程表的
+    /// `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_ALL)` 查询被放行；两者在
+    /// 非沙盒宿主中结果一致，因此统一走 sysctl。
+    nonisolated static func allProcessIDs() -> [pid_t] {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0,
+              size > MemoryLayout<kinfo_proc>.size
+        else { return [] }
+
+        // 枚举期间进程数可能增长，按探测到的容量再加余量一次取完；
+        // 仍不够时截断——下一轮采样会补齐新进程。
+        let capacity = size / MemoryLayout<kinfo_proc>.size + 16
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: capacity)
+        var actualSize = capacity * MemoryLayout<kinfo_proc>.size
+        let result = procs.withUnsafeMutableBytes {
+            sysctl(&mib, UInt32(mib.count), $0.baseAddress, &actualSize, nil, 0)
+        }
+        guard result == 0 else { return [] }
+
+        let count = min(actualSize / MemoryLayout<kinfo_proc>.size, procs.count)
+        return (0 ..< count)
+            .map { procs[$0].kp_proc.p_pid }
+            .filter { $0 > 0 }
+    }
+
     private nonisolated static func sampleProcesses(
         previousSnapshot: [Int32: (user: UInt64, system: UInt64)],
         previousTimestamp: TimeInterval,
@@ -167,23 +200,14 @@ public final class ProcessService: ObservableObject, SuperLog {
         let deltaTime = now - previousTimestamp
         guard deltaTime > 0 else { return ([], previousSnapshot, now) }
 
-        var bufferSize = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
-        guard bufferSize > 0 else { return ([], previousSnapshot, now) }
-
-        let maxCount = Int(bufferSize) / MemoryLayout<pid_t>.size
-        var pids = [pid_t](repeating: 0, count: maxCount)
-
-        bufferSize = proc_listpids(UInt32(PROC_ALL_PIDS), 0, &pids, Int32(bufferSize))
-        let actualCount = Int(bufferSize) / MemoryLayout<pid_t>.size
-        guard actualCount > 0 else { return ([], previousSnapshot, now) }
+        let pids = allProcessIDs()
+        guard !pids.isEmpty else { return ([], previousSnapshot, now) }
 
         var currentSnapshot: [Int32: (user: UInt64, system: UInt64)] = [:]
         var samples: [CPUSample] = []
 
-        for i in 0 ..< actualCount {
+        for pid in pids {
             if Task.isCancelled { break }
-            let pid = pids[i]
-            guard pid > 0 else { continue }
 
             var taskInfo = proc_taskinfo()
             let infoSize = MemoryLayout<proc_taskinfo>.size
