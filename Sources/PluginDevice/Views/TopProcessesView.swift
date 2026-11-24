@@ -103,6 +103,7 @@ struct ProcessMetricRow: View {
             Text(valueText)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(valueColor)
+                .lineLimit(1)
                 .frame(width: valueWidth, alignment: .trailing)
 
             // 进度条：CPU 以单核 100% 为满格；内存以榜首进程为满格。
@@ -167,7 +168,8 @@ struct ProcessMetricRow: View {
     private var valueWidth: CGFloat {
         switch metric {
         case .cpu: 40
-        case .memory: 56
+        // 68pt 容纳内存最宽展示「1,023.9 MB」（进位 GB 前的最宽情形），避免折行。
+        case .memory: 68
         }
     }
 
