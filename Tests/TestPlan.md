@@ -5,7 +5,7 @@
 PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内存 / GPU / 电池 / 存储）与历史趋势， 支持主内容视图、菜单栏图表、设置页与文档页等贡献点。
 
 平台: macOS 14+, iOS 17+
-测试文件: 19 个，用例总数: 96
+测试文件: 19 个，用例总数: 98
 
 核心组件（源码目录）:
 - `Models/`
@@ -155,8 +155,10 @@ PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内�
 | 94 | 设备状态采集 | 按需采样第一轮播种基线，第二轮返回真实进程 | 独立 ProcessService 实例 | 连续两次 `sampleProcessesOnce()` | 首轮为空、次轮非空且进程名非空（**#1293**） | P0 | ✅ 已覆盖 | `onDemandSamplingSeedsBaselineThenReturnsMetrics` |
 | 95 | 进程行图标缓存 | 同一路径第二次读取命中缓存，返回同一实例 | 临时文件路径 | 连续两次 `image(forPath:)` | 两次返回同一 `NSImage` 实例（**#1306**） | P1 | ✅ 已覆盖 | `samePathReturnsCachedInstance` |
 | 96 | 进程行图标缓存 | 不同路径各自解析出有效图标 | 两个临时文件路径 | 分别调用 `image(forPath:)` | 两次都得到宽度大于 0 的图标 | P2 | ✅ 已覆盖 | `differentPathsResolveValidImages` |
+| 97 | 进程内存口径 | 自身进程内存必须是 footprint 而非 RSS（**回归：Lumi 自身几百 MB vs Xcode 十几 GB**） | 当前进程 + `TASK_VM_INFO` | 调用 `memoryBytes(pid:residentBytes:)`，residentBytes 传 1 | 返回值落在 `task_info` `phys_footprint` 的同量级区间 | P1 | ✅ 已覆盖 | `returnsPhysFootprintForSelf` |
+| 98 | 进程内存口径 | `proc_pid_rusage` 失败时回落 residentBytes，榜单不出现 0 | 不存在的 PID | 调用 `memoryBytes(pid:residentBytes:)` | 返回传入的 residentBytes | P2 | ✅ 已覆盖 | `fallsBackToResidentBytes` |
 
-> 说明：全部 **96 条场景**已在本包 `swift test` 中实跑通过。
+> 说明：全部 **98 条场景**已在本包 `swift test` 中实跑通过。
 >
 > 变异验证（#1293）：M8 删除 `sampleProcessesOnce()` 的基线回写 → `onDemandSamplingSeedsBaselineThenReturnsMetrics` 转红（次轮拿不到可比对数据，返回空）。变异确认转红后还原，最终 90 条全绿。
 > 变异验证（#1306）：M9 把 `ProcessIconCache.image(forPath:)` 改为直接调用 `NSWorkspace.icon(forFile:)` → `samePathReturnsCachedInstance` 转红（两次调用返回不同实例）。变异确认转红后还原，最终 92 条全绿。详情列表的 `VStack` → `LazyVStack` 属渲染层改动，无单元断言，靠源码审查锁定。
@@ -166,13 +168,14 @@ PluginDevice Lumi 的设备信息插件，提供系统资源监控（CPU / 内�
 > 变异验证（#649/#793）：M4 删除 `usedMemoryBytes` 的 compressed 项 → `usedMemoryIncludesCompressorPages` 转红；M5 删除 `scanVolumes` 的 `externalVolumes` 赋值 → `eachScanDeliversCurrentRound` 转红（交付数 0）。
 > 变异验证（#1207）：M6 `applyLoadedHistory` 改为直接覆盖 → `restoredCacheMergesWithBootWindowPoints`、`savesAreSkippedWhileRestoring` 转红（启动窗口点丢失）；M7 删除 `saveHistory` 的恢复期封锁 → `savesAreSkippedWhileRestoring` 转红（封锁断言 saveHistory == nil 失败）。以上变异均单独施加并确认转红后还原，最终全量 `swift test` 全绿（86 用例）。
 > #792 的匹配键修复以运行时取证验证：数字键字典返回 165 个事件服务，命名键 `PrimaryUsagePage`/`PrimaryUsage` 返回 57 个温度服务，修复后传感器下标 0...56（与 issue 审计机的预期一致）。
+> 变异验证（进程内存口径）：M12 让 `memoryBytes` 直接返回 `residentBytes` → `returnsPhysFootprintForSelf` 转红（返回值 1 字节，与 footprint 不同量级）；还原后全量 `swift test` 109 用例全绿。
 > 用例名与描述取自 `Tests/` 下的真实 `@Test` 声明，改动测试时须同步本表。
 
 ## 覆盖率统计
 
 - P0: 已覆盖 19 / 19
-- P1: 已覆盖 57 / 57
-- P2: 已覆盖 20 / 20
+- P1: 已覆盖 58 / 58
+- P2: 已覆盖 21 / 21
 - **合计: 96 / 96**（仅表示清单场景，非源码覆盖率）
 
 ## 优先级说明

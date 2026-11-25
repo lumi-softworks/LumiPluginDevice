@@ -99,7 +99,7 @@ struct ProcessMetricRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // 指标值：CPU% 展示真实占用，不做前 N 名归一化；内存展示常驻大小。
+            // 指标值：CPU% 展示真实占用，不做前 N 名归一化；内存展示 footprint（与活动监视器同口径）。
             Text(valueText)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(valueColor)

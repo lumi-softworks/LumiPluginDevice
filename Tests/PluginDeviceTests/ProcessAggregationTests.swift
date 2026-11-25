@@ -76,7 +76,7 @@ struct ProcessAggregationTests {
         #expect(viewModel.topProcessesPreview.first?.name == "Process 1")
     }
 
-    @Test("内存榜按常驻内存降序，且保留零 CPU 的大内存常驻进程")
+    @Test("内存榜按内存占用降序，且保留零 CPU 的大内存进程")
     func memoryRankingKeepsIdleHighMemoryProcesses() {
         let metrics = ProcessService.aggregate([
             sample(pid: 1, name: "Xcode", cpu: 0, memory: 1_500_000_000),

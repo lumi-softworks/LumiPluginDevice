@@ -10,9 +10,14 @@ import LumiLoggingKit
 /// Process monitoring service that reports CPU/memory usage per process.
 ///
 /// PID 枚举走 `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_ALL)`，单个进程的
-/// CPU/内存仍由 libproc（`proc_pidinfo`/`proc_pidpath`）读取。App Sandbox
+/// CPU 与路径仍由 libproc（`proc_pidinfo`/`proc_pidpath`）读取。App Sandbox
 /// 会拒绝 `proc_listpids`（EPERM）但放行 `sysctl` 枚举，因此沙盒宿主
 /// （如 Mac App Store 分发的 Wakey）也能拿到完整进程列表。
+///
+/// 内存口径是 footprint（`proc_pid_rusage` 的 `ri_phys_footprint`），与
+/// 活动监视器、Xcode 内存 gauge、`top` 的 MEM 列一致：它包含 GPU/IOKit
+/// 内存、压缩页与已换出的脏页，能看到 Metal（如 MLX 模型权重）这类不计入
+/// RSS 的占用。取不到时回落 `pti_resident_size`。
 ///
 /// 同名多进程（如浏览器/IDE 的多个 Helper）会合并为一条记录并标注份数，
 /// 与网络区块的展示口径保持一致。同一次采样分别产出 CPU 榜与内存榜：
@@ -47,7 +52,7 @@ public final class ProcessService: ObservableObject, SuperLog {
     /// CPU 榜：只保留本轮有明显 CPU 活动的进程。
     @Published public var topProcesses: [ProcessMetric] = []
 
-    /// 内存榜：按常驻内存降序，包含本轮零 CPU 的常驻进程。
+    /// 内存榜：按内存占用（footprint）降序，包含本轮零 CPU 的常驻进程。
     @Published public var topMemoryProcesses: [ProcessMetric] = []
 
     // MARK: - Private Properties
@@ -233,7 +238,7 @@ public final class ProcessService: ObservableObject, SuperLog {
                     name: getProcessName(pid: pid),
                     icon: appBundlePaths[pid],
                     cpuUsage: cpuPercent,
-                    memoryUsage: Int64(taskInfo.pti_resident_size)
+                    memoryUsage: memoryBytes(pid: pid, residentBytes: taskInfo.pti_resident_size)
                 ))
             }
         }
@@ -246,7 +251,30 @@ public final class ProcessService: ObservableObject, SuperLog {
         metrics.filter { $0.cpuUsage > 0.1 }
     }
 
-    /// 内存榜：按聚合后的常驻内存降序。
+    /// 进程物理内存占用（footprint），与活动监视器 / Xcode / `top` 的 MEM
+    /// 列同口径；取不到时回落到 `residentBytes`（RSS）。
+    ///
+    /// `proc_pid_rusage` 在沙盒宿主里对非自身进程、以及对部分系统进程会返回
+    /// EPERM，此时 RSS 是唯一可得的数值：它漏掉 GPU（IOKit）内存与已换出
+    /// 页，同一进程的数字会明显小于 footprint。
+    nonisolated static func memoryBytes(pid: pid_t, residentBytes: UInt64) -> Int64 {
+        var info = rusage_info_v4()
+        let status = withUnsafeMutablePointer(to: &info) { pointer -> Int32 in
+            // libproc 把第三个参数声明为 `rusage_info_t *`（即 `void **`），
+            // 但内核只把它当目标缓冲区地址用，所以这里做指针类型转换而不是解引用。
+            proc_pid_rusage(
+                pid,
+                RUSAGE_INFO_V4,
+                UnsafeMutableRawPointer(pointer).assumingMemoryBound(to: rusage_info_t?.self)
+            )
+        }
+        if status == 0, info.ri_phys_footprint > 0 {
+            return Int64(clamping: info.ri_phys_footprint)
+        }
+        return Int64(clamping: residentBytes)
+    }
+
+    /// 内存榜：按聚合后的内存占用（footprint）降序。
     ///
     /// 不能沿用 CPU 活动过滤——大内存应用往往整轮采样都是 0% CPU。
     nonisolated static func memoryRanking(_ metrics: [ProcessMetric]) -> [ProcessMetric] {

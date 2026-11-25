@@ -17,6 +17,48 @@ struct ProcessServiceEnumerationTests {
     }
 }
 
+/// 进程内存口径必须是 footprint（活动监视器 / Xcode / `top` MEM 列同款），
+/// 否则 MLX 这类只落在 Metal buffer 上的权重会被漏掉：Lumi 自身显示几百 MB，
+/// 而 Xcode 显示十几 GB。
+@Suite("ProcessService 内存口径")
+struct ProcessServiceMemoryBytesTests {
+
+    private func selfFootprintFromTaskInfo() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<natural_t>.stride
+        )
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? info.phys_footprint : 0
+    }
+
+    @Test("自身进程返回 footprint，而不是 RSS")
+    func returnsPhysFootprintForSelf() {
+        let expected = selfFootprintFromTaskInfo()
+        #expect(expected > 0)
+
+        // residentBytes 故意给 1：实现若退回 RSS，返回值就会是 1。
+        let bytes = ProcessService.memoryBytes(pid: getpid(), residentBytes: 1)
+
+        // 两次读取之间 footprint 会小幅波动，只校验同一量级。
+        #expect(bytes > 1)
+        #expect(Int64(bytes) >= Int64(expected) / 2)
+        #expect(Int64(bytes) <= Int64(max(expected * 2, 16 * 1024 * 1024)))
+    }
+
+    @Test("rusage 不可用时回落到 residentBytes")
+    func fallsBackToResidentBytes() {
+        // 不存在的 PID：proc_pid_rusage 必然失败，走回落分支。
+        let bytes = ProcessService.memoryBytes(pid: Int32.max, residentBytes: 123_456)
+
+        #expect(bytes == 123_456)
+    }
+}
+
 /// `proc_taskinfo.pti_total_user/system` 的单位换算回归测试。
 ///
 /// mach absolute time 的每秒 tick 数随硬件不同（Apple Silicon 24 MHz、
