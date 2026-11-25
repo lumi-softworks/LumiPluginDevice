@@ -14,7 +14,12 @@ public struct MemoryMenuBarPopupView: View {
     }
 
     public var body: some View {
-        HoverableContainerView(detailView: MemoryHistoryDetailView(viewModel: historyViewModel)) {
+        HoverableContainerView(
+            detailView: MemoryHistoryDetailView(
+                viewModel: historyViewModel,
+                processViewModel: viewModel
+            )
+        ) {
             VStack(spacing: 0) {
                 liveStatsView
 
