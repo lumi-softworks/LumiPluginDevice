@@ -1,15 +1,17 @@
 #import <Foundation/Foundation.h>
-#import <IOKit/IOKitLib.h>
 #import "ThermalSensorBridge.h"
+
+#if TARGET_OS_OSX
+#import <IOKit/IOKitLib.h>
 
 // MARK: - Private HID Declarations
 //
 // `IOHIDEventSystemClientCreate` / `IOHIDEventSystemClientSetMatching` /
 // `IOHIDEventSystemClientCopyServices` / `IOHIDServiceClientCopyEvent` /
-// `IOHIDEventGetFloatValue` 只存在于私有头,公开 SDK 未导出声明,故在此显式声明。
+// `IOHIDEventGetFloatValue` 只存在于私有头，公开 SDK 未导出声明，故在此显式声明。
 //
-// 一律使用裸指针 + 手动 retain/release:这些 C API 返回非托管 CF 对象,
-// 若交给 Swift 会与其 CF ARC 标注规则冲突,收敛在本 target 内处理最干净。
+// 一律使用裸指针 + 手动 retain/release：这些 C API 返回非托管 CF 对象，
+// 若交给 Swift 会与其 CF ARC 标注规则冲突，收敛在本 target 内处理最干净。
 
 typedef struct __IOHIDEventSystemClient *LumiHIDEventSystemClientRef;
 typedef struct __IOHIDServiceClient *LumiHIDServiceClientRef;
@@ -32,7 +34,7 @@ extern double IOHIDEventGetFloatValue(LumiHIDEventRef event, uint32_t field);
 /// HID 事件类型 15 = temperature。
 #define LUMI_HID_EVENT_TYPE_TEMPERATURE 15
 
-/// 有效温度区间。未接负载的传感器返回 -1.x,超出物理范围的大值同样不可信。
+/// 有效温度区间。未接负载的传感器返回 -1.x，超出物理范围的大值同样不可信。
 #define LUMI_THERMAL_MIN_CELSIUS 1.0
 #define LUMI_THERMAL_MAX_CELSIUS 150.0
 
@@ -43,10 +45,10 @@ int LumiReadThermalSensors(void *context, LumiThermalSensorCallback callback) {
         LumiHIDEventSystemClientRef client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
         if (client == NULL) return 0;
 
-        // 将服务集限定到 PMU 温度传感器(usage page 0xFF00, usage 5)。
-        // 匹配键必须用命名键 PrimaryUsagePage / PrimaryUsage:若把 0xFF00
-        // 本身当数字键,字典不会过滤任何服务,下标会落进未过滤的事件服务
-        // 数组,编号与 Device / Die / Surface 分组随之错乱(#792)。
+        // 将服务集限定到 PMU 温度传感器（usage page 0xFF00, usage 5）。
+        // 匹配键必须用命名键 PrimaryUsagePage / PrimaryUsage：若把 0xFF00
+        // 本身当数字键，字典不会过滤任何服务，下标会落进未过滤的事件服务
+        // 数组，编号与 Device / Die / Surface 分组随之错乱（#792）。
         int32_t page = LUMI_HID_PAGE_TEMPERATURE;
         int32_t usage = LUMI_HID_USAGE_TEMPERATURE;
         CFNumberRef pageValue = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &page);
@@ -80,7 +82,7 @@ int LumiReadThermalSensors(void *context, LumiThermalSensorCallback callback) {
                 IOHIDServiceClientCopyEvent(service, LUMI_HID_EVENT_TYPE_TEMPERATURE, 0, 0);
             if (event == NULL) continue;
 
-            // 字段索引 = 事件类型 << 16(该 API 的字段寻址方式)。
+            // 字段索引 = 事件类型 << 16（该 API 的字段寻址方式）。
             double celsius = IOHIDEventGetFloatValue(event, LUMI_HID_EVENT_TYPE_TEMPERATURE << 16);
 
             if (celsius >= LUMI_THERMAL_MIN_CELSIUS && celsius <= LUMI_THERMAL_MAX_CELSIUS) {
@@ -96,3 +98,13 @@ int LumiReadThermalSensors(void *context, LumiThermalSensorCallback callback) {
         return reported;
     }
 }
+
+#else
+
+int LumiReadThermalSensors(void *context, LumiThermalSensorCallback callback) {
+    (void)context;
+    (void)callback;
+    return 0;
+}
+
+#endif

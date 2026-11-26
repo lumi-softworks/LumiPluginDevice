@@ -16,7 +16,7 @@ public enum DeviceStatusScope: String, Codable, Sendable, CaseIterable {
     case memory
     /// 存储明细：系统盘与外接卷容量。
     case storage
-    /// 温度明细：各传感器读数与峰值。
+    /// 热压力明细；安装温度传感器时附带读数与峰值。
     case thermal
     /// 进程排行：CPU 榜与内存榜。
     case processes
@@ -240,6 +240,24 @@ public struct DeviceVolumeStatus: Codable, Sendable, Equatable {
     }
 }
 
+/// 系统热压力等级。
+public enum DeviceThermalState: String, Codable, Sendable, Equatable, CaseIterable {
+    case nominal
+    case fair
+    case serious
+    case critical
+
+    public init(_ state: ProcessInfo.ThermalState) {
+        switch state {
+        case .nominal: self = .nominal
+        case .fair: self = .fair
+        case .serious: self = .serious
+        case .critical: self = .critical
+        @unknown default: self = .nominal
+        }
+    }
+}
+
 /// 单个温度传感器读数。
 public struct DeviceThermalReading: Codable, Sendable, Equatable {
     /// 传感器下标。
@@ -256,16 +274,43 @@ public struct DeviceThermalReading: Codable, Sendable, Equatable {
     }
 }
 
-/// 温度状态快照。
+/// 温度与热压力快照。
+///
+/// 同时承载两套数据，以兼容不同宿主与历史消息：
+/// - 热压力永远可用，是 App Store 版本唯一的温度信息；
+/// - 传感器读数与峰值仅在宿主安装精确温度能力时存在。
 public struct DeviceThermalStatus: Codable, Sendable, Equatable {
-    /// 全部传感器读数。
+    /// 系统热压力等级。
+    public let state: DeviceThermalState
+    /// 全部传感器读数；无精确温度能力时为空。
     public let readings: [DeviceThermalReading]
     /// 最高温度（℃）；无读数时为 `nil`。
     public let peakCelsius: Double?
 
-    public init(readings: [DeviceThermalReading], peakCelsius: Double?) {
+    public init(
+        state: DeviceThermalState,
+        readings: [DeviceThermalReading] = [],
+        peakCelsius: Double? = nil
+    ) {
+        self.state = state
         self.readings = readings
         self.peakCelsius = peakCelsius
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case state
+        case readings
+        case peakCelsius
+    }
+
+    /// 兼容两代历史载荷：
+    /// - 热压力版只有 `state`；
+    /// - 传感器版只有 `readings` / `peakCelsius`，没有 `state`。
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        state = try container.decodeIfPresent(DeviceThermalState.self, forKey: .state) ?? .nominal
+        readings = try container.decodeIfPresent([DeviceThermalReading].self, forKey: .readings) ?? []
+        peakCelsius = try container.decodeIfPresent(Double.self, forKey: .peakCelsius)
     }
 }
 

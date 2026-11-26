@@ -30,6 +30,15 @@ struct DashboardHealth {
         let status: MetricStatus?
         /// 展示值，如 "23%"、"58°C"、"514 GB"；不可用时为 "--"。
         let value: String
+        /// 覆盖默认指标名；温度模式与热压力模式共用 `.thermal` 类别。
+        let label: String?
+
+        init(kind: Kind, status: MetricStatus?, value: String, label: String? = nil) {
+            self.kind = kind
+            self.status = status
+            self.value = value
+            self.label = label
+        }
     }
 
     let items: [Item]
@@ -38,10 +47,64 @@ struct DashboardHealth {
     let warningCount: Int
     let criticalCount: Int
 
+    /// 热压力模式：App Store 宿主只拿得到系统热压力。
+    init(
+        cpuPercent: Double,
+        memoryPercent: Double,
+        thermalState: ProcessInfo.ThermalState,
+        batteryHealth: Double?,
+        diskFreeBytes: Int64,
+        diskTotalBytes: Int64
+    ) {
+        self.init(
+            cpuPercent: cpuPercent,
+            memoryPercent: memoryPercent,
+            thermalItem: Item(
+                kind: .thermal,
+                status: ThermalPressure.status(for: thermalState),
+                value: ThermalPressure.title(for: thermalState)
+            ),
+            batteryHealth: batteryHealth,
+            diskFreeBytes: diskFreeBytes,
+            diskTotalBytes: diskTotalBytes
+        )
+    }
+
+    /// 温度模式：宿主安装了精确温度传感器。
     init(
         cpuPercent: Double,
         memoryPercent: Double,
         thermalCelsius: Double?,
+        batteryHealth: Double?,
+        diskFreeBytes: Int64,
+        diskTotalBytes: Int64
+    ) {
+        let label = pluginLocalization.string("CPU Temperature")
+        let thermalItem: Item
+        if let thermalCelsius {
+            thermalItem = Item(
+                kind: .thermal,
+                status: .cpuTemperature(thermalCelsius),
+                value: String(format: "%.0f°C", thermalCelsius),
+                label: label
+            )
+        } else {
+            thermalItem = Item(kind: .thermal, status: nil, value: "--", label: label)
+        }
+        self.init(
+            cpuPercent: cpuPercent,
+            memoryPercent: memoryPercent,
+            thermalItem: thermalItem,
+            batteryHealth: batteryHealth,
+            diskFreeBytes: diskFreeBytes,
+            diskTotalBytes: diskTotalBytes
+        )
+    }
+
+    private init(
+        cpuPercent: Double,
+        memoryPercent: Double,
+        thermalItem: Item,
         batteryHealth: Double?,
         diskFreeBytes: Int64,
         diskTotalBytes: Int64
@@ -54,17 +117,7 @@ struct DashboardHealth {
             ),
         ]
 
-        if let thermalCelsius {
-            items.append(
-                Item(
-                    kind: .thermal,
-                    status: .cpuTemperature(thermalCelsius),
-                    value: String(format: "%.0f°C", thermalCelsius)
-                )
-            )
-        } else {
-            items.append(Item(kind: .thermal, status: nil, value: "--"))
-        }
+        items.append(thermalItem)
 
         items.append(
             Item(
@@ -184,7 +237,7 @@ extension DashboardHealth.Kind {
     var localizedTitle: String {
         switch self {
         case .cpu: return pluginLocalization.string("CPU Usage")
-        case .thermal: return pluginLocalization.string("CPU Temperature")
+        case .thermal: return pluginLocalization.string("Thermal Pressure")
         case .memory: return pluginLocalization.string("Memory Usage")
         case .battery: return pluginLocalization.string("Battery health")
         case .storage: return pluginLocalization.string("Disk available")

@@ -30,7 +30,7 @@ Every host provider is optional. A host that only renders menu bar popups (for e
 | `MenuBarProviding` | Registers the metrics status item and CPU / memory popovers | No menu bar UI |
 | `ActivityBarProviding` + `ContentViewProviding` | Registers the full Device Info page | No full page |
 | `DocsViewProviding` | Adds manual and About entries | No docs entries |
-| `StorageProviding` | Persists CPU / memory / thermal history | History is not persisted |
+| `StorageProviding` | Persists CPU / memory / GPU / battery / optional temperature history | History is not persisted |
 | `DeviceChatContributing` (host injected) | Registers the chat tool and card renderer | No chat contributions |
 
 ## Dependencies and Integration
@@ -71,6 +71,32 @@ A host with a chat surface can attach its own chat contribution. Lumi does this 
 ```swift
 DevicePlugin(chat: DeviceStatusChatContribution())
 ```
+
+## Precise Temperature (Optional)
+
+The core product never references private IOHID symbols. It always reports
+`ProcessInfo.thermalState` (nominal / fair / serious / critical), which is safe
+for App Store submission.
+
+Hosts distributed outside the App Store can additionally link the optional
+product to show per-sensor Celsius readings and temperature history:
+
+```swift
+.product(name: "PluginDeviceThermalSensors", package: "LumiPluginDevice")
+```
+
+```swift
+#if os(macOS)
+import PluginDeviceThermalSensors
+ThermalSensors.install()
+#endif
+
+DevicePlugin()
+```
+
+`ThermalSensors.install()` must run before the plugin is created. App Store
+hosts must not depend on `PluginDeviceThermalSensors`; linking it puts the
+private IOHID symbols into the final binary and triggers review rejection.
 
 ## Testing
 

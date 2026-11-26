@@ -34,7 +34,7 @@ public struct DeviceInfoMenuBarPopupView: View {
         HoverableContainerView(
             detailView: CPUHistoryDetailView(
                 viewModel: historyViewModel,
-                thermalViewModel: thermalHistoryViewModel,
+                thermalViewModel: thermalViewModel.usesSensors ? thermalHistoryViewModel : nil,
                 processViewModel: viewModel
             )
         ) {
@@ -55,9 +55,9 @@ public struct DeviceInfoMenuBarPopupView: View {
             // 紧凑指标行:温度 + 开机时长(标题与数值并排,提高信息密度)
             HStack(spacing: 10) {
                 metric(
-                    label: pluginLocalization.string("Temperature"),
-                    value: temperatureText,
-                    color: thermalViewModel.peakColor
+                    label: thermalViewModel.displayLabel,
+                    value: thermalViewModel.displayValue,
+                    color: thermalViewModel.color
                 )
 
                 metric(
@@ -144,12 +144,6 @@ public struct DeviceInfoMenuBarPopupView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(color)
         }
-    }
-
-    /// 最高温度文本;无温度传感器时用破折号占位(Intel Mac 等)。
-    private var temperatureText: String {
-        guard let peak = thermalViewModel.peakCelsius else { return "—" }
-        return String(format: "%.1f°C", peak)
     }
 
     /// 系统已运行时长（开机至今）；与 CPU 指标同频刷新。

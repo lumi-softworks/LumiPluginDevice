@@ -87,7 +87,7 @@ final class DevicePluginViewModels: ObservableObject {
         battery = BatteryManagerViewModel()
         storage = StorageManagerViewModel()
         systemMonitor = SystemMonitorViewModel()
-        thermal = ThermalViewModel()
+        thermal = ThermalViewModel(usesSensors: ThermalService.shared.usesSensors)
         menuBar = DeviceInfoMenuBarContentViewModel()
     }
 }

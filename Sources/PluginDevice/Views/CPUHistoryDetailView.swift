@@ -6,13 +6,13 @@ import LumiUI
 
 struct CPUHistoryDetailView: View {
     @ObservedObject private var viewModel: DeviceHistoryViewModel<CPUDataPoint>
-    @ObservedObject private var thermalViewModel: DeviceHistoryViewModel<ThermalDataPoint>
     @ObservedObject private var processViewModel: CPUManagerViewModel
+    private let thermalViewModel: DeviceHistoryViewModel<ThermalDataPoint>?
     @State private var selectedRange: CPUTimeRange = .hour1
 
     init(
         viewModel: DeviceHistoryViewModel<CPUDataPoint>,
-        thermalViewModel: DeviceHistoryViewModel<ThermalDataPoint>,
+        thermalViewModel: DeviceHistoryViewModel<ThermalDataPoint>?,
         processViewModel: CPUManagerViewModel
     ) {
         self.viewModel = viewModel
@@ -53,24 +53,21 @@ struct CPUHistoryDetailView: View {
             .background(Color.secondary.opacity(0.06))
             .frame(height: 180)
 
-            // CPU 温度趋势:与负载图共用时间范围,便于上下对照
-            HStack {
-                Text(pluginLocalization.string("CPU Temperature Trend"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary)
+            if let thermalViewModel {
+                // CPU 温度趋势：与负载图共用时间范围，便于上下对照。
+                HStack {
+                    Text(pluginLocalization.string("CPU Temperature Trend"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
 
-                Spacer()
-            }
-            .padding(.horizontal, 12)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
 
-            VStack(spacing: 0) {
-                ThermalHistoryGraphView(
-                    dataPoints: thermalViewModel.data(for: selectedRange),
-                    timeRange: selectedRange
-                )
+                ThermalTrendSection(viewModel: thermalViewModel, timeRange: selectedRange)
+                    .background(Color.secondary.opacity(0.06))
+                    .frame(height: 180)
             }
-            .background(Color.secondary.opacity(0.06))
-            .frame(height: 180)
 
             // 全部进程：主弹窗只展示前 5 条，这里给出完整列表。
             HStack {
@@ -109,6 +106,19 @@ struct CPUHistoryDetailView: View {
             .frame(height: 160)
             .padding(.bottom, 12)
         }
+    }
+}
+
+/// 温度趋势区块：单独观察历史模型，避免热压力模式下创建空模型。
+private struct ThermalTrendSection: View {
+    @ObservedObject var viewModel: DeviceHistoryViewModel<ThermalDataPoint>
+    let timeRange: CPUTimeRange
+
+    var body: some View {
+        ThermalHistoryGraphView(
+            dataPoints: viewModel.data(for: timeRange),
+            timeRange: timeRange
+        )
     }
 }
 

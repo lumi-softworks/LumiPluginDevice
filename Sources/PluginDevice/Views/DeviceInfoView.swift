@@ -346,7 +346,11 @@ private struct DashboardTrendsSection: View {
                 )
             }
 
-            temperatureCard
+            if thermal.usesSensors {
+                temperatureCard
+            } else {
+                thermalPressureCard
+            }
         }
     }
 
@@ -429,6 +433,44 @@ private struct DashboardTrendsSection: View {
         .tint(theme.textSecondary)
     }
 
+    private var thermalPressureCard: some View {
+        DashboardCard(
+            title: pluginLocalization.string("Thermal Pressure"),
+            accessory: {
+                Text(thermal.title)
+                    .font(.appMonoMicro)
+                    .foregroundStyle(thermal.color)
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "thermometer.medium")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(thermal.color)
+
+                    Text(thermal.title)
+                        .font(.appTitle)
+                        .foregroundStyle(thermal.color)
+
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 4) {
+                    ForEach(0..<4, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(index <= thermal.level ? thermal.color : theme.divider)
+                            .frame(height: 6)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 128, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(pluginLocalization.string("Thermal Pressure")): \(thermal.title)")
+        }
+    }
+
     private func legend(_ entries: [(String, String, Color)]) -> some View {
         TrendLegendView(
             entries: entries.map { TrendLegendEntry(id: $0.0, name: $0.1, color: $0.2) }
@@ -489,15 +531,21 @@ private struct DashboardFooterView: View {
             Text("\(pluginLocalization.string("Uptime")): \(formatUptime(deviceData.uptime))")
                 .lineLimit(1)
 
-            if let peak = thermal.peakString {
-                Text("·")
-                Text("\(pluginLocalization.string("Peak Temperature")): \(peak)")
-                    .lineLimit(1)
-            }
+            if thermal.usesSensors {
+                if let peak = thermal.peakString {
+                    Text("·")
+                    Text("\(pluginLocalization.string("Peak Temperature")): \(peak)")
+                        .lineLimit(1)
+                }
 
-            if thermal.isAvailable {
+                if thermal.isAvailable {
+                    Text("·")
+                    Text(String(format: pluginLocalization.string("%d sensors"), thermal.readings.count))
+                        .lineLimit(1)
+                }
+            } else {
                 Text("·")
-                Text(String(format: pluginLocalization.string("%d sensors"), thermal.readings.count))
+                Text("\(pluginLocalization.string("Thermal Pressure")): \(thermal.title)")
                     .lineLimit(1)
             }
 
@@ -534,10 +582,21 @@ private enum DashboardHealthFactory {
             ? battery.healthPercentage
             : nil
 
+        if thermal.usesSensors {
+            return DashboardHealth(
+                cpuPercent: cpu.cpuUsage,
+                memoryPercent: memory.memoryUsagePercentage,
+                thermalCelsius: thermal.peakCelsius,
+                batteryHealth: batteryHealth,
+                diskFreeBytes: max(0, deviceData.diskTotal - deviceData.diskUsed),
+                diskTotalBytes: deviceData.diskTotal
+            )
+        }
+
         return DashboardHealth(
             cpuPercent: cpu.cpuUsage,
             memoryPercent: memory.memoryUsagePercentage,
-            thermalCelsius: thermal.peakCelsius,
+            thermalState: thermal.state,
             batteryHealth: batteryHealth,
             diskFreeBytes: max(0, deviceData.diskTotal - deviceData.diskUsed),
             diskTotalBytes: deviceData.diskTotal

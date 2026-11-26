@@ -6,8 +6,8 @@ import LumiUI
 
 /// CPU / die 温度历史曲线。
 ///
-/// 与 ``CPUHistoryGraphView`` 结构一致(坐标轴 / 网格 / 悬停提示),
-/// 区别在于 Y 轴为摄氏度,且量程随数据自适应,避免固定 0–100 把曲线压成一条平线。
+/// 与 ``CPUHistoryGraphView`` 结构一致（坐标轴 / 网格 / 悬停提示），
+/// 区别在于 Y 轴为摄氏度，且量程随数据自适应，避免固定 0–100 把曲线压成一条平线。
 struct ThermalHistoryGraphView: View {
     let dataPoints: [ThermalDataPoint]
     let timeRange: CPUTimeRange
@@ -18,13 +18,13 @@ struct ThermalHistoryGraphView: View {
     private let yAxisWidth: CGFloat = 40
     private let xAxisHeight: CGFloat = 30
 
-    /// Y 轴上界(℃)。以 50℃ 为下限,向上按 10℃ 步进取整,保证曲线有可读起伏。
+    /// Y 轴上界（℃）。以 50℃ 为下限，向上按 10℃ 步进取整，保证曲线有可读起伏。
     private var maxValue: Double {
         guard let peak = dataPoints.map(\.celsius).max() else { return 100 }
         return max(50, (peak / 10).rounded(.up) * 10 + 10)
     }
 
-    /// Y 轴下界(℃)。低于 20℃ 的读数没有实际意义,固定从 0 起画即可。
+    /// Y 轴下界（℃）。低于 20℃ 的读数没有实际意义，固定从 0 起画即可。
     private var minValue: Double { 0 }
 
     var body: some View {

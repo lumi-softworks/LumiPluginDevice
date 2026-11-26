@@ -102,20 +102,41 @@ final class DeviceMetricsObserver {
         SystemMonitorService.shared.$currentMetrics
             .sink { [weak self] metrics in self?.viewModels.systemMonitor.apply(metrics) }
             .store(in: &cancellables)
-        // 用 `$peakCelsius` 订阅而非 `objectWillChange`:
-        // 后者在数值变更「之前」触发,读到的仍是上一轮采样值,首屏会出现数秒空档。
-        ThermalService.shared.$peakCelsius
-            .sink { [weak self] peak in
-                guard let self else { return }
-                self.viewModels.thermal.apply(
-                    readings: ThermalService.shared.readings,
-                    peak: peak
-                )
-                if let peak {
-                    ThermalHistoryService.shared.recordDataPoint(celsius: peak)
-                }
+        // 用 `$state` 订阅而非 `objectWillChange`，避免首屏读到上一轮采样值。
+        ThermalService.shared.$state
+            .sink { [weak self] state in
+                self?.viewModels.thermal.apply(state: state)
             }
             .store(in: &cancellables)
+
+        // 精确温度只在宿主安装提供者时订阅；未安装时服务不会发布读数。
+        if ThermalService.shared.usesSensors {
+            // 用 `$peakCelsius` 订阅而非 `objectWillChange`：
+            // 后者在数值变更「之前」触发，读到的仍是上一轮采样值，首屏会出现数秒空档。
+            ThermalService.shared.$peakCelsius
+                .sink { [weak self] peak in
+                    guard let self else { return }
+                    self.viewModels.thermal.apply(
+                        readings: ThermalService.shared.readings,
+                        peak: peak
+                    )
+                    if let peak {
+                        ThermalHistoryService.shared.recordDataPoint(celsius: peak)
+                    }
+                }
+                .store(in: &cancellables)
+            // 峰值不变时传感器明细仍可能变化（个别传感器温度回落），
+            // 单独订阅读数让明细保持实时。
+            ThermalService.shared.$readings
+                .sink { [weak self] readings in
+                    guard let self else { return }
+                    self.viewModels.thermal.apply(
+                        readings: readings,
+                        peak: ThermalService.shared.peakCelsius
+                    )
+                }
+                .store(in: &cancellables)
+        }
 
         // 四组历史缓冲各自分开订阅：`@Published` 只在缓冲真正变化时发射。
         // 原先 combineLatest 让 recent-only 的采样 tick 也携带长期缓冲进入
@@ -198,7 +219,9 @@ final class DeviceMetricsObserver {
         ThermalService.shared.stopMonitoring()
         ProcessService.shared.stopMonitoring()
         CPUHistoryService.shared.stopRecording()
-        ThermalHistoryService.shared.stopRecording()
+        if ThermalService.shared.usesSensors {
+            ThermalHistoryService.shared.stopRecording()
+        }
         GPUHistoryService.shared.stopRecording()
         MemoryHistoryService.shared.stopRecording()
         BatteryHistoryService.shared.stopRecording()

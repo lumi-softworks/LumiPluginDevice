@@ -7,6 +7,24 @@ struct DashboardHealthTests {
     private func make(
         cpu: Double = 20,
         memory: Double = 40,
+        thermal: ProcessInfo.ThermalState = .nominal,
+        battery: Double? = 95,
+        diskFree: Int64 = 500,
+        diskTotal: Int64 = 1000
+    ) -> DashboardHealth {
+        DashboardHealth(
+            cpuPercent: cpu,
+            memoryPercent: memory,
+            thermalState: thermal,
+            batteryHealth: battery,
+            diskFreeBytes: diskFree,
+            diskTotalBytes: diskTotal
+        )
+    }
+
+    private func makeTemperature(
+        cpu: Double = 20,
+        memory: Double = 40,
         thermal: Double? = 55,
         battery: Double? = 95,
         diskFree: Int64 = 500,
@@ -66,9 +84,31 @@ struct DashboardHealthTests {
         #expect(health.band == .fair)
     }
 
+    @Test("偏热时热压力项为告警，并封顶 84")
+    func fairThermalWarns() {
+        let health = make(thermal: .fair)
+
+        let thermal = health.items.first { $0.kind == .thermal }
+        #expect(thermal?.status == .warning)
+        #expect(health.warningCount == 1)
+        #expect(health.score == 84)
+        #expect(health.band == .fair)
+    }
+
+    @Test("温度模式下最高温度参与评分并使用 CPU Temperature 标签")
+    func temperatureModeScoresPeak() {
+        let health = makeTemperature(thermal: 72)
+
+        let thermal = health.items.first { $0.kind == .thermal }
+        #expect(thermal?.status == .warning)
+        #expect(thermal?.value == "72°C")
+        #expect(thermal?.label == pluginLocalization.string("CPU Temperature"))
+        #expect(health.score == 84)
+    }
+
     @Test("温度不可用时该项不参与评分")
-    func missingThermalIsExcluded() {
-        let health = make(thermal: nil)
+    func missingTemperatureIsExcluded() {
+        let health = makeTemperature(thermal: nil)
 
         let thermal = health.items.first { $0.kind == .thermal }
         #expect(thermal?.status == nil)
@@ -108,6 +148,19 @@ struct DashboardHealthTests {
     )
     func diskFreeThresholds(percent: Double, expected: MetricStatus) {
         #expect(MetricStatus.diskFree(percent) == expected)
+    }
+
+    @Test(
+        "热压力映射：normal 正常、fair 告警、serious 与 critical 临界",
+        arguments: [
+            (ProcessInfo.ThermalState.nominal, MetricStatus.normal),
+            (ProcessInfo.ThermalState.fair, MetricStatus.warning),
+            (ProcessInfo.ThermalState.serious, MetricStatus.critical),
+            (ProcessInfo.ThermalState.critical, MetricStatus.critical),
+        ]
+    )
+    func thermalPressureMapping(state: ProcessInfo.ThermalState, expected: MetricStatus) {
+        #expect(ThermalPressure.status(for: state) == expected)
     }
 
     @Test(

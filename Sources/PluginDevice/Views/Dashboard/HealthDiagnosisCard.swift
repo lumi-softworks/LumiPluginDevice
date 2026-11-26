@@ -81,7 +81,7 @@ struct HealthDiagnosisCard: View {
                 .fill(item.status?.color(in: theme) ?? theme.textTertiary.opacity(0.45))
                 .frame(width: 6, height: 6)
 
-            Text(item.kind.localizedTitle)
+            Text(item.label ?? item.kind.localizedTitle)
                 .font(.appMicro)
                 .foregroundStyle(theme.textSecondary)
                 .lineLimit(1)

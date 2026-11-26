@@ -8,16 +8,16 @@ import os
 
 /// CPU / die 温度历史采集服务。
 ///
-/// 与 CPU / GPU / 内存历史服务保持一致的结构：高频缓冲(2s,保留 1 小时)+
-/// 分钟级聚合缓冲(保留 30 天)。温度没有温度传感器可读时(Intel Mac),
-/// 采样端不会写入任何数据,历史曲线自然为空。
+/// 与 CPU / GPU / 内存历史服务保持一致的结构：高频缓冲（2 s，保留 1 小时）+
+/// 分钟级聚合缓冲（保留 30 天）。没有可读的温度传感器时（Intel Mac），
+/// 采样端不会写入任何数据，历史曲线自然为空。
 @MainActor
 public final class ThermalHistoryService: ObservableObject, SuperLog {
     public static let shared = ThermalHistoryService()
     nonisolated static let logger = Logger(subsystem: "com.coffic.lumi", category: "devicemonitor.thermal-history")
     nonisolated public static let emoji = "🌡️"
 
-    /// 高频缓冲(2s 采样)—— 保留最近 1 小时
+    /// 高频缓冲（2 s 采样）—— 保留最近 1 小时
     @Published public var recentHistory: [ThermalDataPoint] = []
 
     /// 分钟级聚合缓冲 —— 保留最近 30 天
@@ -32,12 +32,12 @@ public final class ThermalHistoryService: ObservableObject, SuperLog {
     private let storageFileName = "thermal_history.json"
     private let fileManager = FileManager.default
 
-    /// 插件存储目录;由插件入口在 `onBoot` 注入。
+    /// 插件存储目录；由插件入口在 `onBoot` 注入。
     private static var pluginStorageDirectory: URL?
 
     /// 注入插件存储目录。应在 `onBoot` 中调用。
     ///
-    /// 注入后立即补载历史:服务单例可能早于目录注入被创建,
+    /// 注入后立即补载历史：服务单例可能早于目录注入被创建，
     /// 那时目录为空、无法读到磁盘上的历史数据。
     public static func configure(storageDirectory: URL) {
         pluginStorageDirectory = storageDirectory

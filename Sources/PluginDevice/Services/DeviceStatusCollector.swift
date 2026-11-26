@@ -161,10 +161,11 @@ public final class DeviceStatusCollector {
         )
     }
 
-    /// 温度快照。
+    /// 温度与热压力快照。
     private func thermalStatus() -> DeviceThermalStatus {
         let service = ThermalService.shared
         return DeviceThermalStatus(
+            state: DeviceThermalState(service.state),
             readings: service.readings.map {
                 DeviceThermalReading(index: $0.index, kind: $0.kind?.rawValue, celsius: $0.celsius)
             },

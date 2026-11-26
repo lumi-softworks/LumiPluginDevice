@@ -13,6 +13,11 @@ let package = Package(
             name: "PluginDevice",
             targets: ["PluginDevice"]
         ),
+        // 可选：通过 IOHID 读取精确温度。App Store 宿主不要依赖此产品。
+        .library(
+            name: "PluginDeviceThermalSensors",
+            targets: ["PluginDeviceThermalSensors"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/lumi-softworks/LumiProviders.git", from: "1.26.0"),
@@ -38,7 +43,6 @@ let package = Package(
                 .product(name: "ProviderStorage", package: "LumiProviders"),
                 .product(name: "ProviderRootView", package: "LumiProviders"),
                 .product(name: "LumiLoggingKit", package: "LumiLogging"),
-                "PluginDeviceThermalBridge",
             ],
             path: "Sources/PluginDevice",
             exclude: [
@@ -52,6 +56,16 @@ let package = Package(
             resources: [
                 .process("../../Resources/Localizable.xcstrings")
             ]
+        ),
+        // 可选温度模块：唯一引用 IOHID 私有符号的 Swift target。
+        // 只有明确依赖本产品的宿主才会链接这些符号。
+        .target(
+            name: "PluginDeviceThermalSensors",
+            dependencies: [
+                "PluginDevice",
+                "PluginDeviceThermalBridge",
+            ],
+            path: "Sources/PluginDeviceThermalSensors"
         ),
         // 温度采集桥接层：纯 ObjC，封装 IOKit 私有 HID API。
         // SwiftPM 单 target 不支持混编，故拆为独立 target。
@@ -68,6 +82,12 @@ let package = Package(
                 .product(name: "ProviderMenuBar", package: "LumiProviders"),
                 .product(name: "ProviderDocsView", package: "LumiProviders"),
                 .product(name: "ProviderSettingView", package: "LumiSettings"),
+            ]
+        ),
+        .testTarget(
+            name: "PluginDeviceThermalSensorsTests",
+            dependencies: [
+                "PluginDeviceThermalSensors",
             ]
         ),
     ]

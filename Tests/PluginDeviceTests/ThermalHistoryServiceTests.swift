@@ -24,7 +24,7 @@ struct ThermalHistoryServiceTests {
         let now = Date().timeIntervalSince1970
 
         service.recordDataPoint(celsius: 40.0)
-        // 构造一个 2 小时前的点,模拟持久化加载后的历史数据
+        // 构造一个 2 小时前的点，模拟持久化加载后的历史数据
         service.recentHistory.append(
             ThermalDataPoint(timestamp: now - 7200, celsius: 30.0)
         )

@@ -33,7 +33,7 @@
 | `MenuBarProviding` | 注册指标状态项与 CPU / 内存 popover | 无菜单栏 UI |
 | `ActivityBarProviding` + `ContentViewProviding` | 注册完整设备信息页 | 无完整详情页 |
 | `DocsViewProviding` | 添加说明书与关于条目 | 无文档条目 |
-| `StorageProviding` | 持久化 CPU / 内存 / 温度历史 | 历史不落盘 |
+| `StorageProviding` | 持久化 CPU / 内存 / GPU / 电池 / 可选温度历史 | 历史不落盘 |
 | `DeviceChatContributing`（宿主注入） | 注册聊天工具与卡片渲染器 | 无聊天贡献 |
 
 ## 依赖与接入
@@ -75,6 +75,30 @@ DevicePlugin(
 ```swift
 DevicePlugin(chat: DeviceStatusChatContribution())
 ```
+
+## 精确温度（可选）
+
+核心 product 不引用任何 IOHID 私有符号，始终提供
+`ProcessInfo.thermalState`（nominal / fair / serious / critical），可安全提交
+App Store。
+
+不走 App Store 的宿主可以额外链接可选 product，展示逐传感器摄氏度与温度历史：
+
+```swift
+.product(name: "PluginDeviceThermalSensors", package: "LumiPluginDevice")
+```
+
+```swift
+#if os(macOS)
+import PluginDeviceThermalSensors
+ThermalSensors.install()
+#endif
+
+DevicePlugin()
+```
+
+`ThermalSensors.install()` 必须在创建插件之前调用。App Store 宿主不得依赖
+`PluginDeviceThermalSensors`：一旦链接，私有 IOHID 符号会进入最终二进制并触发审核拒绝。
 
 ## 测试
 
